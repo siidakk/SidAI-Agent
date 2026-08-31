@@ -5,8 +5,9 @@ It talks, uses 42 tools to control your PC and the real web, remembers you,
 works in the background while you're away, and reaches your phone when it's
 finished — for free, with nothing leaving your machine that doesn't have to.
 
-📐 **[Read the architecture walkthrough →](https://claude.ai/code/artifact/283ec604-b3ba-49f5-9d16-83426a7795ce)**
-An illustrated, plain-language tour of how it all fits together.
+📐 **[Read the architecture walkthrough →](https://siidakk.github.io/SidAI-Agent/)**
+An illustrated, plain-language tour of how it all fits together — five
+diagrams, no code required. Source: [`docs/index.html`](docs/index.html).
 
 ---
 
