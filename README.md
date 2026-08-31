@@ -1,13 +1,18 @@
 # Sid
 
+### 📐 [**How it works — the architecture walkthrough →**](https://siidakk.github.io/SidAI-Agent/)
+
+> An illustrated, plain-language tour of the whole system: three processes,
+> the request lifecycle, the one permission checkpoint, and the safety model.
+> **Five diagrams, no code required.**
+> Start there if you want to understand this without reading 10,000 lines.
+
+---
+
 **A self-hosted personal AI agent that runs entirely on your own laptop.**
 It talks, uses 42 tools to control your PC and the real web, remembers you,
 works in the background while you're away, and reaches your phone when it's
 finished — for free, with nothing leaving your machine that doesn't have to.
-
-📐 **[Read the architecture walkthrough →](https://siidakk.github.io/SidAI-Agent/)**
-An illustrated, plain-language tour of how it all fits together — five
-diagrams, no code required. Source: [`docs/index.html`](docs/index.html).
 
 ---
 
@@ -68,9 +73,12 @@ If the shortcut isn't there yet, see First-time setup below.
 ## If you cloned this
 
 Nothing secret is in this repo, by design. `.env`, `credentials.json`, the
-`data/` folder (your memories, tokens and logs) and the downloaded models are
-all gitignored — so a fresh clone has **no keys and no data**, and you supply
-your own in the setup below.
+`data/` folder (memories, tokens, logs) and the downloaded models are all
+gitignored — verified across every commit, not just the latest. A fresh clone
+has **no keys and no data**; you supply your own in the setup below.
+
+Sid is single-user and trusts whoever is at the keyboard. Don't expose it to
+the internet beyond the built-in tunnel, and keep your own `.env` out of git.
 
 It is built for Windows: several tools call Win32 APIs directly for windows,
 volume and media keys. Everything else is portable.
