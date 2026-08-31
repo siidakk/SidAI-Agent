@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inside Sid — taking you to the right page</title>
+<meta name="robots" content="noindex">
+
+<!--
+  GitHub Pages serves this file for any path it can't match.
+
+  It exists because of one genuinely confusing thing about this setup: Pages
+  is configured with `docs/` as the SITE ROOT, so `docs/index.html` is served
+  at `/SidAI-Agent/` — and the URL a person would naturally guess from
+  browsing the repo, `/SidAI-Agent/docs/index.html`, is a 404.
+
+  Rather than explain that, this just takes them where they meant to go.
+-->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='34' fill='%233ED8F0'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    --void: #05090F;
+    --ink:  #E6F0F4;
+    --mid:  #9DB3BE;
+    --low:  #647C89;
+    --cyan: #3ED8F0;
+    --hair: rgba(160, 200, 215, 0.13);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--void);
+    color: var(--ink);
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 28px;
+    text-align: center;
+    overflow: hidden;
+  }
+  .glow {
+    position: fixed;
+    width: 70vw; height: 70vw;
+    top: -26vw; left: -18vw;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(23,168,196,0.28), transparent 68%);
+    filter: blur(90px);
+    pointer-events: none;
+  }
+  .box { position: relative; max-width: 34rem; }
+
+  .orb {
+    width: 84px; height: 84px;
+    margin: 0 auto 34px;
+    position: relative;
+  }
+  .ring, .core { position: absolute; border-radius: 50%; }
+  .ring { inset: 0; border: 1px solid rgba(62,216,240,0.34); }
+  .sweep {
+    position: absolute; inset: -4px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    border-top-color: var(--cyan);
+    animation: sweep 4s linear infinite;
+  }
+  .core {
+    inset: 28px;
+    background: radial-gradient(circle at 34% 30%, #BFF4FF, var(--cyan) 44%, #17A8C4 76%);
+    box-shadow: 0 0 26px rgba(62,216,240,0.7), 0 0 62px rgba(62,216,240,0.32);
+    animation: breathe 5s ease-in-out infinite;
+  }
+  @keyframes sweep   { to { transform: rotate(360deg); } }
+  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+
+  h1 {
+    font-family: "Sora", sans-serif;
+    font-weight: 800;
+    font-size: clamp(30px, 7vw, 46px);
+    letter-spacing: -0.04em;
+    margin: 0 0 14px;
+  }
+  p { color: var(--mid); line-height: 1.65; margin: 0 0 12px; font-size: 14.5px; }
+  .path {
+    color: var(--low);
+    font-size: 12.5px;
+    word-break: break-all;
+    border: 1px solid var(--hair);
+    border-radius: 8px;
+    padding: 9px 12px;
+    margin: 20px 0 26px;
+    display: inline-block;
+  }
+  a.go {
+    display: inline-block;
+    font-family: "Sora", sans-serif;
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--void);
+    background: var(--cyan);
+    text-decoration: none;
+    padding: 12px 26px;
+    border-radius: 999px;
+    transition: transform 0.25s cubic-bezier(0.22,1,0.36,1), box-shadow 0.25s;
+  }
+  a.go:hover { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(62,216,240,0.32); }
+  a.go:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .small { font-size: 12px; color: var(--low); margin-top: 22px; }
+  .small a { color: var(--cyan); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<span class="glow" aria-hidden="true"></span>
+
+<div class="box">
+  <div class="orb" aria-hidden="true">
+    <span class="ring"></span>
+    <span class="sweep"></span>
+    <span class="core"></span>
+  </div>
+
+  <h1>Nothing at that address</h1>
+  <p>The walkthrough lives at the site root, not one level down.</p>
+  <div class="path" id="tried"></div>
+
+  <a class="go" href="/SidAI-Agent/">Take me to Inside Sid →</a>
+
+  <p class="small">
+    Sending you there in <span id="count">4</span>s ·
+    <a href="https://github.com/siidakk/SidAI-Agent">back to the repo</a>
+  </p>
+</div>
+
+<script>
+  // Show what they actually asked for — being told which URL failed is more
+  // useful than a generic apology.
+  document.getElementById("tried").textContent = location.pathname;
+
+  // Redirect, but slowly enough to read, and never in a way that traps the
+  // back button: replace() would break "go back", so use assign().
+  var left = 4;
+  var el = document.getElementById("count");
+  var timer = setInterval(function () {
+    left -= 1;
+    el.textContent = left;
+    if (left <= 0) { clearInterval(timer); location.assign("/SidAI-Agent/"); }
+  }, 1000);
+
+  // Any interaction means they're reading — stop the countdown.
+  ["keydown", "click", "wheel", "touchstart"].forEach(function (ev) {
+    addEventListener(ev, function () {
+      clearInterval(timer);
+      document.querySelector(".small").innerHTML =
+        '<a href="https://github.com/siidakk/SidAI-Agent">back to the repo</a>';
+    }, { once: true });
+  });
+</script>
+</body>
+</html>
