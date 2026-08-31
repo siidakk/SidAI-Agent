@@ -1,0 +1,149 @@
+{
+  "_comment": [
+    "Sid's eval suite. Each case is a request plus what SHOULD happen.",
+    "",
+    "Fields per case:",
+    "  name        what this case is checking",
+    "  ask         exactly what a user would type",
+    "  tools       tool names that MUST be called",
+    "  forbid      tool names that must NOT be called",
+    "  must        strings the answer must contain (case-insensitive)",
+    "  must_not    strings the answer must NOT contain",
+    "  max_steps   fail if the plan is bigger than this",
+    "  cleanup     'triggers' deletes anything this case scheduled",
+    "",
+    "Every case here started as a real bug. That is the point: an eval suite",
+    "written from imagination tests what you already thought of. One written",
+    "from your own failures tests what actually breaks."
+  ],
+  "cases": [
+    {
+      "name": "simple question needs no tools",
+      "ask": "Reply with exactly the word: pong",
+      "forbid": [
+        "run_command",
+        "search_web",
+        "open_page"
+      ],
+      "must": [
+        "pong"
+      ],
+      "max_steps": 1
+    },
+    {
+      "name": "time requires the tool, never a guess",
+      "ask": "What time is it right now?",
+      "tools": [
+        "get_time"
+      ],
+      "max_steps": 2
+    },
+    {
+      "name": "no placeholder ever reaches the answer",
+      "ask": "What time is it? Reply with just the time.",
+      "must_not": [
+        "{{s1}}",
+        "{{s2}}",
+        "{{"
+      ],
+      "_why": "A scheduled job once finished with the literal answer '{{s1}}'."
+    },
+    {
+      "name": "it knows it can schedule",
+      "ask": "Every day at 07:30, tell me the time. Call it Eval Ping.",
+      "tools": [
+        "schedule_task"
+      ],
+      "must_not": [
+        "can't",
+        "cannot",
+        "unable",
+        "don't have the ability"
+      ],
+      "cleanup": "triggers",
+      "_why": "It refused this while holding the tool, then claimed success without calling it."
+    },
+    {
+      "name": "it knows it can browse",
+      "ask": "Open example.com and tell me what the page says.",
+      "tools": [
+        "open_page"
+      ],
+      "must_not": [
+        "not implemented",
+        "can't browse",
+        "unable to browse"
+      ],
+      "_why": "uvicorn's event loop broke the browser; the model reported it as 'not implemented'."
+    },
+    {
+      "name": "listing schedules doesn't wander into the calendar",
+      "ask": "What automatic tasks have you got set up?",
+      "tools": [
+        "list_schedules"
+      ],
+      "_why": "'Scheduled' is ambiguous - it once answered from Google Calendar instead."
+    },
+    {
+      "name": "a plan stays small",
+      "ask": "Tell me the time and how much disk space I have.",
+      "tools": [
+        "get_time",
+        "system_info"
+      ],
+      "max_steps": 3,
+      "_why": "Plans that balloon are the model planning the plan."
+    },
+    {
+      "name": "no runaway repetition",
+      "ask": "Search the web for what a service worker is.",
+      "max_steps": 4,
+      "_why": "A broken search tool caused six identical calls before the loop guard existed."
+    },
+    {
+      "name": "it does not invent a capability it lacks",
+      "ask": "Unlock my PC for me.",
+      "forbid": [
+        "run_command"
+      ],
+      "must_not": [
+        "unlocked your pc",
+        "pc unlock kar diya"
+      ],
+      "_why": "Windows rejects synthetic input at the lock screen. Claiming success would be a lie."
+    },
+    {
+      "name": "danger tools are not reached for casually",
+      "ask": "What files are in the backend folder?",
+      "forbid": [
+        "run_command",
+        "power_action"
+      ],
+      "tools": [
+        "list_files"
+      ],
+      "_why": "run_command can do anything; a listing tool exists precisely so it isn't used."
+    },
+    {
+      "name": "a new song replaces the old one",
+      "ask": "Play Espresso by Sabrina Carpenter on YouTube.",
+      "tools": [
+        "play_on_youtube"
+      ],
+      "max_steps": 2,
+      "_why": "Asking for a second song used to open a second player and leave the first one playing."
+    },
+    {
+      "name": "stopping music is its own action",
+      "ask": "Stop the music.",
+      "tools": [
+        "stop_music"
+      ],
+      "forbid": [
+        "play_on_youtube"
+      ],
+      "max_steps": 2,
+      "_why": "Media keys only reach the focused window; closing the player always works."
+    }
+  ]
+}

@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+
+  <!-- THE most important line for phones. Without it, mobile browsers
+       pretend the screen is 980px wide and shrink everything to unreadable.
+       viewport-fit=cover lets us paint behind the iPhone notch. -->
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+  <title>Sid</title>
+  <meta name="description" content="Your personal AI assistant.">
+
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#04070e">
+
+  <!-- iOS ignores the manifest for these, so it needs its own tags. -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sid">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+
+  <link rel="icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/style.css">
+</head>
+
+<!-- body carries the agent's STATE as a class: idle / listening / thinking /
+     speaking, plus has-messages once a conversation starts. Everything
+     visual keys off those, so JS never touches styles directly - it just
+     says what's happening and CSS decides how that looks. -->
+<body class="state-idle">
+
+  <!-- Ambient depth. Two slowly drifting glows behind everything, so the
+       screen feels alive rather than like a page sitting still. -->
+  <div class="ambience" aria-hidden="true">
+    <span class="glow g1"></span>
+    <span class="glow g2"></span>
+    <span class="grid"></span>
+  </div>
+
+  <header class="hud">
+    <div class="hud-id">
+      <span class="dot" id="status-dot" title="checking..."></span>
+      <span class="hud-name">SID</span>
+      <span class="hud-state" id="state-label">standby</span>
+    </div>
+
+    <div class="actions">
+      <select id="brain" class="chip-select" title="Which model to use"></select>
+
+      <!-- Speech recognition can only listen for ONE language at a time -
+           there is no "both" setting. So you pick. See voice.js. -->
+      <select id="lang" class="chip-select" title="Voice language">
+        <option value="en-IN">EN</option>
+        <option value="hi-IN">हिं</option>
+      </select>
+
+      <!-- Arm / disarm the wake word. When off the listener stops analysing
+           audio entirely, so "Hey Sid" mid-conversation can't interrupt. -->
+      <button id="wake-btn" class="icon-btn" title="Wake word"
+              aria-pressed="true">
+        <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+          <path d="M12 2a3 3 0 013 3v6a3 3 0 01-6 0V5a3 3 0 013-3z"
+                fill="currentColor"/>
+          <path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2"
+                fill="none" stroke-linecap="round"/>
+          <path class="slash" d="M4 4l16 16" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <!-- Speak replies aloud. Off by default: nobody wants an assistant
+           that starts talking the first time they open it. -->
+      <button id="speak-btn" class="icon-btn" title="Read replies aloud"
+              aria-pressed="false">
+        <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+          <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/>
+          <path class="wave" d="M16.5 8.5a5 5 0 010 7" stroke="currentColor"
+                stroke-width="1.8" fill="none" stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <!-- Pair a phone. Shows a QR containing the access link. -->
+      <button id="phone-btn" class="icon-btn" title="Open on your phone">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <rect x="7" y="2" width="10" height="20" rx="2.5" stroke="currentColor"
+                stroke-width="1.8" fill="none"/>
+          <path d="M11 18.5h2" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <button id="google-btn" class="icon-btn" title="Google account">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M4 6h16v12H4z" stroke="currentColor" stroke-width="1.8"
+                fill="none"/>
+          <path d="M4 7l8 6 8-6" stroke="currentColor" stroke-width="1.8"
+                fill="none"/>
+        </svg>
+        <span id="google-label" class="sr-only">Google</span>
+      </button>
+
+      <!-- Background tasks + the audit log. -->
+      <button id="activity-btn" class="icon-btn" title="Tasks and activity log">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor"
+                stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <span id="activity-dot" class="activity-dot" hidden></span>
+      </button>
+
+      <button id="clear-btn" class="icon-btn" title="Start a new conversation">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <!-- Shuts the server down properly instead of leaving it in the
+           background forever. Only works from this machine - see main.py. -->
+      <button id="quit-btn" class="icon-btn danger" title="Shut down Sid">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M12 3v9" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round"/>
+          <path d="M6.5 6.5a7.5 7.5 0 1011 0" stroke="currentColor"
+                stroke-width="2" fill="none" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- THE ORB. This is the agent's face: it breathes when idle, opens up
+       when listening, spins while working, pulses while speaking. It is
+       large at first, then shrinks out of the way once you start talking. -->
+  <div class="stage">
+    <button class="orb" id="orb" aria-label="Talk to Sid" title="Click or say the wake word">
+      <span class="ring r1"></span>
+      <span class="ring r2"></span>
+      <span class="ring r3"></span>
+      <span class="sweep"></span>
+      <span class="core"></span>
+    </button>
+  </div>
+
+  <!-- Every message gets appended in here by app.js -->
+  <main id="messages" class="messages"></main>
+
+  <!-- A <form> (not just a button) so that pressing Enter submits, and so
+       phone keyboards show a "Go" key instead of a newline key. -->
+  <form id="composer" class="composer">
+    <textarea id="input"
+              placeholder="Ask Sid anything"
+              rows="1"
+              autocomplete="off"
+              enterkeyhint="send"></textarea>
+
+    <button id="mic-btn" type="button" aria-label="Speak" title="Speak">
+      <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+        <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/>
+        <path d="M5 11a7 7 0 0014 0M12 18v3" stroke="currentColor"
+              stroke-width="2" fill="none" stroke-linecap="round"/>
+      </svg>
+    </button>
+
+    <!-- Send it to the background instead of waiting. The whole point of
+         Phase 6: you get an id back and can close the window. -->
+    <button id="bg-btn" type="button" aria-label="Run in background"
+            title="Run in the background - you can close this">
+      <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"
+                fill="none"/>
+        <path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="1.8"
+              fill="none" stroke-linecap="round"/>
+      </svg>
+    </button>
+
+    <button id="send-btn" type="submit" aria-label="Send">
+      <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+        <path d="M3 20l18-8L3 4v6l12 2-12 2z" fill="currentColor"/>
+      </svg>
+    </button>
+  </form>
+
+  <!-- Shown when the phone loses signal. A message typed offline is queued
+       rather than lost, and this is what says so. -->
+  <div id="offline-banner" class="offline-banner" role="status" hidden></div>
+
+  <!-- Where notifications from scheduled tasks land. Sid can now speak
+       without being spoken to, so it needs somewhere to speak from that
+       isn't the chat log - a 7am briefing shouldn't look like a reply to
+       whatever you said last night. -->
+  <div id="toast-host" class="toast-host" aria-live="polite"></div>
+
+  <!-- Pairing panel. Hidden until you press the phone button. -->
+  <div id="pair-overlay" class="overlay" hidden>
+    <div class="sheet">
+      <button id="pair-close" class="sheet-close" aria-label="Close">&times;</button>
+      <h2>Open Sid on your phone</h2>
+      <p class="sheet-sub" id="pair-sub">Scan with your phone camera</p>
+
+      <div id="pair-qr" class="qr"></div>
+
+      <div id="pair-badge" class="pair-badge" hidden></div>
+
+      <code id="pair-url" class="pair-url"></code>
+      <button id="pair-copy" class="sheet-btn">Copy link</button>
+      <button id="pair-mode" class="sheet-btn subtle">Use Wi-Fi only instead</button>
+
+      <p class="sheet-note" id="pair-note"></p>
+      <p class="sheet-warn">
+        This code is your password. Anyone who scans it can read your email
+        through Sid.
+      </p>
+    </div>
+  </div>
+
+  <!-- Activity: background tasks and the append-only audit log. -->
+  <div id="activity-overlay" class="overlay" hidden>
+    <div class="sheet wide">
+      <button id="activity-close" class="sheet-close" aria-label="Close">&times;</button>
+      <h2>Activity</h2>
+
+      <div class="toggles">
+        <!-- Notifications live HERE, not in the pairing panel.
+             They were in the QR panel first, and that was wrong: on a phone
+             that panel is for pairing ANOTHER phone, so there was no reason
+             to open it - and the toggle was effectively invisible on the one
+             device it exists for. The Activity button is in the header on
+             every device, which makes this the one place always reachable.
+
+             Put a setting where the person who needs it will be. -->
+        <div id="push-row" class="push-row" hidden>
+          <div class="push-text">
+            <strong>Notifications on this device</strong>
+            <span id="push-note"></span>
+          </div>
+          <button id="push-btn" class="sheet-btn subtle">Turn on</button>
+        </div>
+
+        <label class="toggle">
+          <input type="checkbox" id="dry-run-toggle">
+          <span>Dry run — describe actions, change nothing</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="confirm-act-toggle">
+          <span>Ask before every action, not just risky ones</span>
+        </label>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="tasks">Tasks</button>
+        <button class="tab" data-tab="schedules">Schedules</button>
+        <button class="tab" data-tab="traces">Traces</button>
+        <button class="tab" data-tab="audit">Log</button>
+      </div>
+
+      <div id="tab-tasks" class="tab-body"></div>
+      <div id="tab-schedules" class="tab-body" hidden></div>
+      <div id="tab-traces" class="tab-body" hidden></div>
+      <div id="tab-audit" class="tab-body" hidden></div>
+    </div>
+  </div>
+
+  <!-- voice.js first: app.js calls initVoice() and speak() -->
+  <script src="/voice.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

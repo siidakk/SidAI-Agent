@@ -1,0 +1,868 @@
+/* =========================================================================
+   style.css — Sid.
+
+   The brief was "it should feel like an agent is there, not a browser".
+   Three things do most of that work:
+
+     1. THE ORB. An agent needs a face. A pulsing core that reacts to what
+        it's doing — breathing when idle, opening when listening, spinning
+        while working — reads as presence in a way a chat log never does.
+     2. NO PAGE EDGES. No cards, no borders, no visible scrollbars, nothing
+        that says "document". Content floats on a dark field.
+     3. STATE IS VISIBLE EVERYWHERE. The body carries a state class and the
+        whole screen shifts with it. You should be able to tell what Sid is
+        doing from across the room.
+
+   All motion is CSS. No canvas, no libraries, and it costs almost nothing.
+   ========================================================================= */
+
+:root {
+  --bg:        #04070e;
+  --bg-lift:   #0a1220;
+  --surface:   #0e1826;
+  --line:      #1c2c42;
+
+  --text:      #dce9fb;
+  --text-dim:  #6b829f;
+
+  /* Cyan reads as "machine" without being cold. The warm amber is reserved
+     entirely for approvals, so danger never blends into normal chrome. */
+  --cyan:      #34d5f0;
+  --cyan-soft: #34d5f033;
+  --blue:      #4b7dff;
+  --amber:     #fbbf24;
+  --green:     #4ade80;
+  --danger:    #ff6b6b;
+
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; height: 100dvh; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               Helvetica, Arial, sans-serif;
+  font-size: 15.5px;      /* >=16px on the input stops iOS zooming on focus */
+  line-height: 1.6;
+  overflow: hidden;
+  position: relative;
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* ==================================================================== */
+/*  Ambience — slow drifting light behind everything                     */
+/* ==================================================================== */
+.ambience { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+
+.glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: .5;
+  /* Very long durations on purpose: you should never catch it moving,
+     only notice the screen isn't static. */
+  animation: drift 34s ease-in-out infinite alternate;
+}
+.g1 {
+  width: 55vmax; height: 55vmax; left: -18vmax; top: -18vmax;
+  background: radial-gradient(circle, #0e4f6b 0%, transparent 68%);
+}
+.g2 {
+  width: 48vmax; height: 48vmax; right: -16vmax; bottom: -16vmax;
+  background: radial-gradient(circle, #26306e 0%, transparent 68%);
+  animation-duration: 44s; animation-direction: alternate-reverse;
+}
+@keyframes drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(6vmax, 4vmax, 0) scale(1.12); }
+}
+
+/* A faint engineering grid. Masked to fade out at the edges so it reads as
+   depth rather than as a texture pasted on top. */
+.grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 46px 46px;
+  opacity: .16;
+  mask-image: radial-gradient(ellipse at 50% 40%, #000 10%, transparent 72%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 40%, #000 10%, transparent 72%);
+}
+
+/* ==================================================================== */
+/*  HUD                                                                  */
+/* ==================================================================== */
+.hud {
+  position: relative; z-index: 3;
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  padding: calc(11px + var(--safe-top)) 16px 11px;
+}
+
+.hud-id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+.hud-name {
+  font-family: var(--mono);
+  font-size: 13px; font-weight: 700; letter-spacing: .34em;
+  color: var(--text);
+}
+
+.hud-state {
+  font-family: var(--mono);
+  font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--cyan);
+  padding: 3px 8px;
+  border: 1px solid var(--cyan-soft);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text-dim); flex: 0 0 auto;
+  transition: background .3s, box-shadow .3s;
+}
+.dot.ok  { background: var(--green); box-shadow: 0 0 10px var(--green); }
+.dot.bad { background: var(--danger); box-shadow: 0 0 10px var(--danger); }
+.dot.warming { background: var(--amber); animation: blink 1.4s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+
+.actions { display: flex; align-items: center; gap: 6px; }
+
+.chip-select {
+  background: transparent; color: var(--text-dim);
+  border: 1px solid var(--line); border-radius: 7px;
+  padding: 5px 6px; font-family: var(--mono); font-size: 11px;
+  cursor: pointer; max-width: 118px;
+}
+.chip-select:hover { color: var(--text); border-color: var(--cyan-soft); }
+.chip-select option { background: var(--surface); }
+
+.icon-btn {
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  background: transparent; color: var(--text-dim);
+  border: 1px solid var(--line); border-radius: 8px;
+  cursor: pointer; transition: color .2s, border-color .2s;
+}
+.icon-btn:hover { color: var(--cyan); border-color: var(--cyan-soft); }
+.icon-btn.danger:hover { color: var(--danger); border-color: #ff6b6b55; }
+.icon-btn[aria-pressed="true"] { color: var(--cyan); border-color: var(--cyan-soft); }
+.icon-btn[aria-pressed="false"] .wave { opacity: .25; }
+
+/* Wake word switch. Armed = cyan with no slash; off = dim with a line
+   struck through it. A struck-through icon reads as "disabled" instantly,
+   which a colour change alone does not. */
+#wake-btn .slash { opacity: 1; }
+#wake-btn[aria-pressed="true"]  { color: var(--cyan); border-color: var(--cyan-soft); }
+#wake-btn[aria-pressed="true"] .slash { opacity: 0; }
+#wake-btn[aria-pressed="false"] { color: var(--text-dim); }
+#google-btn[data-connected="1"] { color: var(--green); border-color: #4ade8044; }
+
+/* ==================================================================== */
+/*  THE ORB — the agent's face                                           */
+/* ==================================================================== */
+.stage {
+  position: relative; z-index: 2;
+  flex: 0 0 auto;
+  display: grid; place-items: center;
+  height: 40vh; min-height: 210px;
+  transition: height .55s cubic-bezier(.4, 0, .2, 1),
+              min-height .55s cubic-bezier(.4, 0, .2, 1),
+              opacity .4s;
+}
+
+/* Once you're talking, the orb gets out of the way. It doesn't disappear —
+   the agent is still present, just smaller. */
+body.has-messages .stage { height: 92px; min-height: 92px; }
+
+.orb {
+  position: relative;
+  width: 190px; height: 190px;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  display: grid; place-items: center;
+
+  /* transform, not width/height. Animating width makes the browser redo
+     layout on every single frame; transform is handled by the compositor
+     and touches nothing else on the page. Same visual result, a fraction
+     of the work - and it's the general rule for any size or position
+     animation, not a trick specific to this orb. */
+  transform: scale(1);
+  transition: transform .55s cubic-bezier(.4, 0, .2, 1);
+  will-change: transform;
+}
+body.has-messages .orb { transform: scale(.326); }   /* 190px -> ~62px */
+
+.ring, .core, .sweep {
+  position: absolute; border-radius: 50%; pointer-events: none;
+}
+
+.ring { border: 1px solid var(--cyan); opacity: .22; }
+.r1 { inset: 0; }
+.r2 { inset: 13%; opacity: .3; }
+.r3 { inset: 27%; opacity: .16; border-style: dashed; }
+
+/* The rotating arc. A conic gradient masked into a thin ring reads as a
+   scanning sweep, and costs one element instead of an SVG. */
+.sweep {
+  inset: 4%;
+  background: conic-gradient(from 0deg, transparent 0 62%,
+              var(--cyan) 84%, transparent 100%);
+  mask: radial-gradient(circle, transparent 61%, #000 63%);
+  -webkit-mask: radial-gradient(circle, transparent 61%, #000 63%);
+  opacity: .5;
+  animation: spin 9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.core {
+  inset: 38%;
+  background: radial-gradient(circle at 38% 32%, #a9f2ff 0%,
+              var(--cyan) 42%, var(--blue) 100%);
+  box-shadow: 0 0 26px var(--cyan), 0 0 62px #34d5f055;
+  animation: breathe 4.6s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 100% { transform: scale(1);    opacity: .88; }
+  50%      { transform: scale(1.11); opacity: 1; }
+}
+
+/* ---- state: LISTENING — rings push outward, everything brightens ---- */
+body.state-listening .core {
+  animation-duration: 1.15s;
+  box-shadow: 0 0 34px var(--cyan), 0 0 90px #34d5f077;
+}
+body.state-listening .ring { animation: expand 1.9s ease-out infinite; }
+body.state-listening .r2 { animation-delay: .35s; }
+body.state-listening .r3 { animation-delay: .7s; }
+@keyframes expand {
+  0%   { transform: scale(.9);  opacity: .55; }
+  100% { transform: scale(1.22); opacity: 0; }
+}
+body.state-listening .hud-state { color: var(--green); border-color: #4ade8055; }
+
+/* ---- state: THINKING — the sweep speeds up ---- */
+body.state-thinking .sweep { animation-duration: 1.05s; opacity: .95; }
+body.state-thinking .core { animation-duration: 2s; }
+body.state-thinking .hud-state { color: var(--amber); border-color: #fbbf2455; }
+
+/* ---- state: SPEAKING ---- */
+body.state-speaking .core { animation-duration: .75s; }
+body.state-speaking .hud-state { color: var(--blue); border-color: #4b7dff55; }
+
+/* ==================================================================== */
+/*  Messages                                                             */
+/* ==================================================================== */
+.messages {
+  position: relative; z-index: 2;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 18px 8px;
+  display: flex; flex-direction: column; gap: 18px;
+  scrollbar-width: none;              /* Firefox */
+}
+.messages::-webkit-scrollbar { width: 0; height: 0; }
+
+.msg {
+  max-width: 720px; width: 100%; margin: 0 auto;
+  display: flex; gap: 14px;
+  animation: rise .32s cubic-bezier(.2, .8, .3, 1);
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(9px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.msg .who {
+  flex: 0 0 auto; width: 34px; padding-top: 2px;
+  font-family: var(--mono);
+  font-size: 9.5px; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.msg.assistant .who { color: var(--cyan); }
+
+.msg .col  { flex: 1 1 auto; min-width: 0; }
+.msg .body { white-space: pre-wrap; word-wrap: break-word; }
+.msg.error .body { color: var(--danger); }
+
+.caret::after {
+  content: "▍"; color: var(--cyan);
+  animation: blink 1s steps(2, start) infinite;
+}
+
+/* ---- tool steps ---- */
+.steps { margin-bottom: 10px; display: flex; flex-direction: column; gap: 5px; }
+
+.step {
+  font-family: var(--mono); font-size: 11.5px;
+  color: var(--text-dim);
+  background: linear-gradient(90deg, var(--cyan-soft), transparent 60%);
+  border-left: 2px solid var(--cyan);
+  border-radius: 0 6px 6px 0;
+  padding: 5px 10px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.step.running { animation: pulse 1.2s ease-in-out infinite; }
+.step.running::before { content: "\2022  "; color: var(--cyan); }
+.step.done { border-left-color: var(--green); animation: none;
+             background: linear-gradient(90deg, #4ade8018, transparent 60%); }
+.step.done::before { content: "\2713  "; color: var(--green); }
+@keyframes pulse { 50% { opacity: .45; } }
+
+/* ==================================================================== */
+/*  Approval card — amber, and the only amber in the app                 */
+/* ==================================================================== */
+.approval {
+  margin: 0 0 12px;
+  border: 1px solid #fbbf2444; border-left: 3px solid var(--amber);
+  border-radius: 10px; background: #fbbf240d; padding: 12px 14px;
+  animation: rise .3s cubic-bezier(.2, .8, .3, 1);
+}
+.approval-head {
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--amber); margin-bottom: 9px;
+}
+/* The real command, never truncated. If it's long, you scroll. Hiding half
+   of it would defeat the entire point of asking. */
+.approval-detail {
+  font-family: var(--mono); font-size: 12px; line-height: 1.55;
+  background: #04070ecc; border: 1px solid var(--line); border-radius: 6px;
+  padding: 9px 11px; margin: 0 0 11px;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 200px; overflow-y: auto; color: var(--text);
+}
+.approval-buttons { display: flex; gap: 8px; }
+.approval-buttons button {
+  flex: 1 1 auto; padding: 9px 14px; border-radius: 8px;
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--line);
+}
+.approval-buttons button:disabled { opacity: .45; cursor: default; }
+.approval-no  { background: var(--surface); color: var(--text); }
+.approval-no:focus { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.approval-yes { background: var(--amber); color: #04070e; border-color: var(--amber); }
+.approval.granted { border-color: #4ade8044; border-left-color: var(--green);
+                    background: #4ade800d; }
+.approval.granted .approval-head { color: var(--green); }
+.approval.denied  { border-color: var(--line); border-left-color: var(--text-dim);
+                    background: transparent; }
+.approval.denied  .approval-head { color: var(--text-dim); }
+.approval-verdict { font-size: 12px; color: var(--text-dim); }
+
+/* ==================================================================== */
+/*  Composer                                                             */
+/* ==================================================================== */
+.composer {
+  position: relative; z-index: 3;
+  flex: 0 0 auto;
+  display: flex; gap: 9px; align-items: flex-end;
+  padding: 12px 18px calc(14px + var(--safe-bottom));
+  max-width: 760px; width: 100%; margin: 0 auto;
+}
+
+.composer textarea {
+  flex: 1 1 auto; resize: none; max-height: 150px;
+  padding: 13px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #0a1220cc;
+  backdrop-filter: blur(10px);
+  color: var(--text); font: inherit; font-size: 16px;
+  outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+.composer textarea::placeholder { color: #4c6178; }
+.composer textarea:focus {
+  border-color: var(--cyan-soft);
+  box-shadow: 0 0 0 3px #34d5f014;
+}
+
+.composer button {
+  flex: 0 0 auto;
+  width: 46px; height: 46px;          /* 44px is the minimum tap target */
+  border: 1px solid var(--line); border-radius: 14px;
+  background: #0a1220cc; color: var(--text-dim);
+  display: grid; place-items: center; cursor: pointer;
+  transition: color .2s, border-color .2s, background .2s;
+}
+.composer button:hover { color: var(--cyan); border-color: var(--cyan-soft); }
+.composer button:disabled { opacity: .35; cursor: not-allowed; }
+
+#send-btn { background: linear-gradient(135deg, var(--cyan), var(--blue));
+            color: #04070e; border-color: transparent; }
+
+#mic-btn.listening {
+  color: #04070e; background: var(--green); border-color: var(--green);
+  animation: mic-pulse 1.3s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 #4ade8066; }
+  60%      { box-shadow: 0 0 0 12px #4ade8000; }
+}
+/* Can't be used here (http, or no browser support). Dimmed rather than
+   hidden — a visible button that explains itself beats a missing one. */
+#mic-btn.unavailable { opacity: .35; }
+
+/* ==================================================================== */
+/*  Empty state — deliberately sparse. The orb is the welcome.           */
+/* ==================================================================== */
+.empty-state {
+  margin: auto; text-align: center; color: var(--text-dim);
+  padding: 6px 20px 20px;
+}
+.empty-state h2 {
+  font-family: var(--mono); font-size: 13px; font-weight: 500;
+  letter-spacing: .22em; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 7px;
+}
+.empty-state p { font-size: 13.5px; opacity: .8; }
+
+@media (min-width: 760px) {
+  .messages { padding: 4px 24px 10px; }
+}
+
+/* Anyone who has asked their OS to reduce motion should not be given a
+   spinning, breathing, drifting interface. */
+@media (prefers-reduced-motion: reduce) {
+  .glow, .sweep, .core, .ring, .step.running, #mic-btn.listening, .msg {
+    animation: none !important;
+  }
+  .stage, .orb { transition: none; }
+}
+
+
+/* ==================================================================== */
+/*  The plan — steps on the same row run at the same time                */
+/* ==================================================================== */
+.plan {
+  margin: 0 0 12px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: #0a122099;
+}
+
+.plan-head {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px;
+}
+
+/* A row IS a wave. Everything in it starts together — which is the whole
+   thing the picture needs to communicate. */
+.plan-wave {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;
+  padding-left: 10px; border-left: 2px solid var(--line);
+}
+.plan-wave:last-child { margin-bottom: 0; }
+
+.plan-step {
+  font-family: var(--mono); font-size: 11.5px;
+  padding: 4px 9px; border-radius: 6px;
+  border: 1px solid var(--line); color: var(--text-dim);
+  background: var(--bg);
+  transition: color .2s, border-color .2s;
+}
+.plan-step.running {
+  color: var(--cyan); border-color: var(--cyan-soft);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.plan-step.done   { color: var(--green); border-color: #4ade8044; }
+.plan-step.done::before   { content: "¹3 "; }
+.plan-step.failed { color: var(--danger); border-color: #ff6b6b44; }
+.plan-step.failed::before { content: "¹7 "; }
+
+
+/* ==================================================================== */
+/*  Overlay panels (pairing)                                            */
+/* ==================================================================== */
+.overlay {
+  position: fixed; inset: 0; z-index: 50;
+  display: grid; place-items: center;
+  background: #04070ecc; backdrop-filter: blur(6px);
+  padding: 20px;
+}
+.overlay[hidden] { display: none; }
+
+.sheet {
+  position: relative;
+  width: 100%; max-width: 330px;
+  background: var(--surface);
+  border: 1px solid var(--line); border-radius: 16px;
+  padding: 24px 22px 20px;
+  text-align: center;
+  animation: rise .25s cubic-bezier(.2, .8, .3, 1);
+}
+
+.sheet h2 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.sheet-sub { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+
+.sheet-close {
+  position: absolute; top: 10px; right: 12px;
+  background: none; border: 0; color: var(--text-dim);
+  font-size: 22px; line-height: 1; cursor: pointer; padding: 4px 8px;
+}
+.sheet-close:hover { color: var(--text); }
+
+/* White plate behind the QR. Scanners need real contrast — a dark-themed
+   QR on a dark background reads badly on a lot of phone cameras. */
+.qr {
+  background: #fff; border-radius: 12px;
+  padding: 10px; margin: 0 auto 14px;
+  display: inline-block; min-height: 40px;
+  font-size: 12px; color: #04070e;
+}
+.qr img { display: block; width: 200px; height: 200px; image-rendering: pixelated; }
+
+.pair-url {
+  display: block; font-family: var(--mono); font-size: 10.5px;
+  color: var(--text-dim); word-break: break-all;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 7px;
+  padding: 7px 9px; margin-bottom: 10px;
+}
+
+.sheet-btn {
+  width: 100%; padding: 9px; border-radius: 9px;
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--line); font: inherit; font-size: 13px;
+  cursor: pointer; margin-bottom: 12px;
+}
+.sheet-btn:hover { border-color: var(--cyan-soft); color: var(--cyan); }
+
+.sheet-note { font-size: 11.5px; color: var(--text-dim); line-height: 1.5;
+               white-space: pre-wrap; text-align: left; }
+
+/* Says plainly which kind of link this QR is, because the difference
+   (working microphone or not) is invisible otherwise. */
+.pair-badge {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em;
+  text-transform: uppercase; padding: 4px 9px; border-radius: 999px;
+  display: inline-block; margin-bottom: 12px;
+}
+.pair-badge.secure   { color: var(--green); border: 1px solid #4ade8044; }
+.pair-badge.insecure { color: var(--amber); border: 1px solid #fbbf2444; }
+
+.sheet-btn.subtle {
+  background: transparent; color: var(--text-dim); font-size: 12px;
+  border-color: transparent; margin-bottom: 6px;
+}
+.sheet-btn.subtle:hover { color: var(--text); border-color: var(--line); }
+.sheet-warn {
+  font-size: 11.5px; color: var(--amber); line-height: 1.5; margin-top: 10px;
+  border-top: 1px solid var(--line); padding-top: 10px;
+}
+
+
+/* ==================================================================== */
+/*  Activity panel — background tasks and the audit log                  */
+/* ==================================================================== */
+.sheet.wide { max-width: 480px; text-align: left; }
+.sheet.wide h2 { text-align: left; margin-bottom: 14px; }
+
+/* A dot on the button when something is happening — or, brighter, when a
+   task is parked waiting for you. A job that waits silently forever is the
+   failure mode this exists to prevent. */
+.activity-dot {
+  position: absolute; top: 4px; right: 4px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--cyan);
+}
+.activity-dot.needs { background: var(--amber); animation: blink 1.2s infinite; }
+#activity-btn { position: relative; }
+
+.toggles { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.toggle {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 13px; color: var(--text-dim); cursor: pointer;
+}
+.toggle input { accent-color: var(--cyan); width: 15px; height: 15px; }
+.toggle:hover { color: var(--text); }
+
+.tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.tab {
+  background: none; border: 1px solid var(--line); border-radius: 7px;
+  color: var(--text-dim); font: inherit; font-size: 12.5px;
+  padding: 5px 12px; cursor: pointer;
+}
+.tab.active { color: var(--cyan); border-color: var(--cyan-soft); }
+
+.tab-body { max-height: 44vh; overflow-y: auto; font-size: 13px; }
+.tab-body[hidden] { display: none; }
+
+.row {
+  border: 1px solid var(--line); border-left: 2px solid var(--line);
+  border-radius: 8px; padding: 9px 11px; margin-bottom: 8px;
+}
+.row-head { color: var(--text); margin-bottom: 3px; }
+.row-meta { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); }
+.row-out  { font-size: 12px; color: var(--text-dim); margin-top: 6px;
+            white-space: pre-wrap; }
+
+.row.status-running        { border-left-color: var(--cyan); }
+.row.status-done           { border-left-color: var(--green); }
+.row.status-failed,
+.row.status-cancelled      { border-left-color: var(--danger); }
+.row.status-needs_approval { border-left-color: var(--amber);
+                             background: #fbbf240d; }
+
+/* The log is dense on purpose — you scan it, you don't read it. */
+.log-row {
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
+  padding: 4px 8px; border-left: 2px solid var(--line);
+  margin-bottom: 3px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis;
+}
+.log-row.tier-act    { border-left-color: var(--cyan); }
+.log-row.tier-danger { border-left-color: var(--amber); }
+.log-row.failed      { color: var(--danger); border-left-color: var(--danger); }
+
+/* ==========================================================================
+   Phase 9 — notifications Sid raises on its own, and the schedules panel
+   ========================================================================= */
+
+/* Top-right, above everything, and out of the way of the composer. These
+   appear when you weren't looking, so they must be noticeable without
+   covering what you were doing. */
+.toast-host {
+  position: fixed;
+  /* Below the HUD bar (52px tall), not over it. Measured, not guessed -
+     at top:16px the first toast sat squarely on the header icons. */
+  top: 64px;
+  right: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(340px, calc(100vw - 32px));
+  pointer-events: none;                 /* the gaps stay click-through */
+}
+
+.app-toast {
+  pointer-events: auto;
+  position: relative;
+  padding: 12px 34px 12px 14px;
+  border-radius: 12px;
+  background: rgba(10, 18, 26, 0.92);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--cyan);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(10px);
+  animation: toast-in 0.28s ease-out;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Colour carries the meaning: amber needs you, red went wrong. */
+.app-toast.kind-approval { border-left-color: var(--amber); }
+.app-toast.kind-error    { border-left-color: #ff6b6b; }
+
+.app-toast-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--cyan);
+  margin-bottom: 3px;
+}
+.app-toast.kind-approval .app-toast-title { color: var(--amber); }
+.app-toast.kind-error    .app-toast-title { color: #ff8f8f; }
+
+.app-toast-body {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.app-toast-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: 0;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.app-toast-close:hover { color: var(--text); }
+
+.app-toast .sheet-btn { margin-top: 10px; width: 100%; }
+
+/* --- the Schedules tab -------------------------------------------------- */
+
+/* A paused schedule is dimmed rather than hidden. You need to see that it
+   exists and isn't running — a schedule that vanishes when paused is one
+   you forget you ever made. */
+.row.status-off { opacity: 0.5; }
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.mini-btn {
+  padding: 4px 11px;
+  font-size: 11.5px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.mini-btn:hover { color: var(--cyan); border-color: var(--cyan); }
+.mini-btn.danger:hover { color: #ff8f8f; border-color: #ff8f8f; }
+
+@media (max-width: 520px) {
+  .toast-host { top: 60px; right: 10px; left: 10px; max-width: none; }
+}
+
+/* ==========================================================================
+   Phase 10 — the phone
+   ========================================================================= */
+
+/* Offline banner. Under the HUD so it never covers the controls, and full
+   width because "you are offline" is not a detail to be squinted at. */
+.offline-banner {
+  position: fixed;
+  top: 52px;
+  left: 0;
+  right: 0;
+  z-index: 55;
+  padding: 7px 14px;
+  text-align: center;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  color: #0d0f14;
+  background: var(--amber);
+  animation: toast-in 0.25s ease-out;
+}
+
+/* Push toggle inside the pairing sheet. */
+.push-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 4px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-align: left;
+}
+
+.push-text { flex: 1; min-width: 0; }
+
+.push-text strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.push-text span {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.push-row .sheet-btn {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+  padding: 7px 14px;
+  font-size: 12px;
+}
+
+/* Safe areas — the notch and the home indicator.
+   viewport-fit=cover (index.html) lets the page paint edge to edge, which
+   also means the OS will happily draw its own bars ON TOP of our controls
+   unless we pad for them. env() is zero on hardware without a notch, so
+   this costs nothing on a laptop. */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .composer {
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+    padding-left:   calc(14px + env(safe-area-inset-left));
+    padding-right:  calc(14px + env(safe-area-inset-right));
+  }
+  .hud {
+    padding-top:   env(safe-area-inset-top);
+    padding-left:  calc(14px + env(safe-area-inset-left));
+    padding-right: calc(14px + env(safe-area-inset-right));
+  }
+  .offline-banner { top: calc(52px + env(safe-area-inset-top)); }
+  .toast-host     { top: calc(64px + env(safe-area-inset-top)); }
+}
+
+@media (max-width: 520px) {
+  /* A hit target under ~44px is one people miss. Phones only — on a desktop
+     with a mouse these would just be chunky. */
+  .push-row .sheet-btn { min-height: 40px; }
+  .mini-btn            { min-height: 36px; padding: 7px 14px; }
+}
+
+/* ==========================================================================
+   Phase 11 — traces
+   ========================================================================= */
+
+.trace-steps {
+  margin: 8px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Each step is a bar plus a label. The bar is scaled against the SLOWEST
+   step in that turn, so the eye lands on the expensive one immediately —
+   which is the entire reason to record per-step timings at all. */
+.trace-step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 18px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.trace-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--cyan-soft);
+  border-left: 2px solid var(--cyan);
+}
+
+.trace-step.failed .trace-bar {
+  background: rgba(255, 107, 107, 0.18);
+  border-left-color: #ff6b6b;
+}
+
+.trace-label {
+  position: relative;
+  padding: 2px 8px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.trace-row.status-failed { border-color: rgba(255, 107, 107, 0.35); }

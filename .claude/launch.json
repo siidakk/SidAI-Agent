@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "axon",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-m", "uvicorn", "backend.main:app", "--reload",
+                      "--host", "0.0.0.0", "--port", "8321",
+                      "--timeout-graceful-shutdown", "3"],
+      "port": 8321
+    }
+  ]
+}

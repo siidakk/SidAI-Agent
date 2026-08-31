@@ -1,0 +1,39 @@
+# The libraries Axon needs. Install with:
+#     py -m pip install -r requirements.txt
+
+fastapi>=0.115           # the web framework (routes, validation)
+uvicorn[standard]>=0.30  # the server that actually runs FastAPI
+python-dotenv>=1.0       # loads the .env file
+httpx>=0.27              # async HTTP - how we talk to Ollama and Gemini
+
+# Google connectors (Phase 3). Needed for Gmail + Calendar.
+google-auth>=2.30
+google-auth-oauthlib>=1.2
+
+# Only needed if you set AXON_PROVIDER=claude. Safe to skip.
+anthropic>=0.75
+
+# Absolute volume control. Without it, volume still works via media keys,
+# just less precisely.
+pycaw>=20240210
+
+# Only needed for mobile.py - prints the pairing QR code. Tiny, no deps.
+segno>=1.6
+
+# Only needed if you use AXON_WAKE_ENGINE=porcupine for a custom wake phrase.
+pvporcupine>=3.0
+
+# Only needed for the wake word (listener.py). Safe to skip -
+# everything else works without them. About 250 MB installed.
+openwakeword>=0.6
+sounddevice>=0.4
+pillow>=10          # install.py uses it to build the .ico
+
+# Phase 10 — push notifications to your phone with Sid closed.
+pywebpush>=2.0
+
+# Phase 10 — parsing what Android's share sheet posts. Sid asks for
+# urlencoded (no files, just text), which Starlette handles on its own; this
+# is here because Android has been known to send multipart regardless, and a
+# share that fails silently on a phone is miserable to debug.
+python-multipart>=0.0.9

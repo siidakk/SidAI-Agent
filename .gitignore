@@ -1,0 +1,43 @@
+# --- secrets: the most important lines in this file -----------------------
+# NOTE: gitignore has no inline comments. Only a line STARTING with # is a
+# comment - "credentials.json  # my key" is one long filename that matches
+# nothing. Keep every comment on its own line.
+
+.env
+
+# Google OAuth client, downloaded from Cloud Console
+credentials.json
+
+# the encrypted token vault
+data/
+
+# downloaded speech/wake-word models (large, re-downloadable)
+models/*
+!models/README.md
+
+# in case you ever use the google library's default token path
+token.json
+
+# --- python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# --- editors / os ---------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- later phases ---------------------------------------------------------
+*.db
+*.sqlite3
+data/
+
+# runtime logs
+logs/
+
+# local eval run history - it records real answers, which quote you
+evals/history.jsonl
