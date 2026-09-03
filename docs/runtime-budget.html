@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sid Runtime Budget — what it actually costs to run</title>
+<meta name="description" content="Measured cost of running Sid: 102 real turns, latency by mode, per-tool timings, memory, disk and money.">
+<meta property="og:title" content="Sid Runtime Budget">
+<meta property="og:description" content="What a self-hosted AI agent actually costs to run, measured over 102 real turns.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='34' fill='%233ED8F0'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<link rel="stylesheet" href="assets/sid.css">
+<link rel="stylesheet" href="assets/charts.css">
+<style>
+  /* two-series rows carry two numbers, so they need more room */
+  #mode-bars .bar-value, #mem-bars .bar-value { min-width: 118px; }
+  @media (max-width: 620px) {
+    #mode-bars .bar-value, #mem-bars .bar-value { min-width: 92px; font-size: 10.5px; }
+  }
+</style>
+</head>
+<body data-palette="#2193E0,#C97500">
+
+<div class="progress" id="progress"></div>
+<div class="ambience" aria-hidden="true">
+  <span class="field f1"></span><span class="field f2"></span><span class="mesh"></span>
+</div>
+
+<nav class="sitenav">
+  <a href="./">Inside Sid</a>
+  <a href="build-ladder.html">Build Ladder</a>
+  <a href="runtime-budget.html" aria-current="page">Runtime Budget</a>
+  <a href="https://github.com/siidakk/SidAI-Agent">Source ↗</a>
+</nav>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow rise d1">Runtime budget · measured, not estimated</p>
+    <h1 class="rise d2">What it costs<br>to run</h1>
+    <p class="standfirst rise d3">
+      Every number on this page came out of Sid's own trace log — 102 real turns on
+      one 8 GB Windows laptop. Nothing here is a projection, and where a figure is
+      awkward it is printed anyway.
+    </p>
+  </header>
+
+  <div class="stats reveal">
+    <div class="stat"><b>3.2<span class="unit">s</span></b><span>median turn</span></div>
+    <div class="stat"><b>81<span class="unit">%</span></b><span>done within 5s</span></div>
+    <div class="stat"><b>305<span class="unit"> KB</span></b><span>all data on disk</span></div>
+    <div class="stat"><b>1.0<span class="unit">%</span></b><span>turns errored</span></div>
+    <div class="stat"><b>0<span class="unit"> ₹</span></b><span>per month</span></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <section class="spine">
+    <div class="sec-head reveal"><span class="sec-num">01</span><h2>The short answer</h2></div>
+    <p>
+      Sid costs <strong>nothing in money</strong> and about <strong>three seconds of
+      your attention</strong> per request. The real budget is memory: on a machine
+      with roughly half a gigabyte free, the browser tool is the only part big enough
+      to matter, and it closes itself when idle.
+    </p>
+    <p>
+      The numbers below are worth reading in one specific way — not "is this fast?"
+      but <em>where does the time actually go</em>. The answer turns out to be
+      lopsided, and it changes what is worth optimising.
+    </p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <div class="sec-head reveal"><span class="sec-num">02</span><h2>How long a turn takes</h2></div>
+
+    <div class="spine">
+      <p>
+        102 turns, all on Gemini 3.5 Flash Lite. The distribution matters more than
+        the median: most turns land in a tight band, and a small tail is dragged out
+        by one thing.
+      </p>
+    </div>
+
+    <div class="panel reveal">
+      <div class="panel-bar">
+        <h4>Where the 102 turns landed</h4>
+        <span class="note">count per bucket</span>
+      </div>
+      <div class="panel-body">
+        <div class="chart">
+          <div class="histo" id="histo"></div>
+          <div class="histo-axis" id="histo-axis"></div>
+          <div class="chart-foot">
+            <span class="chart-source">source · data/traces.db, n=102</span>
+            <button class="table-toggle" data-target="histo-table">Show table</button>
+          </div>
+          <div class="table-scroll" id="histo-table" hidden>
+            <table>
+              <thead><tr><th>Bucket</th><th class="num">Turns</th><th class="num">Share</th></tr></thead>
+              <tbody id="histo-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spine">
+      <p>
+        Read cumulatively rather than by bucket: <strong>39% of turns finish inside
+        3 seconds, 81% inside 5, and 95% inside 10.</strong> The single turn over 20
+        seconds was a page load, which is the theme of the next section.
+      </p>
+    </div>
+
+    <div class="panel reveal">
+      <div class="panel-bar">
+        <h4>Answering directly vs. running a plan</h4>
+        <span class="note">median and 90th percentile</span>
+      </div>
+      <div class="panel-body">
+        <div class="chart">
+          <div class="legend">
+            <span class="key"><span class="swatch" style="background:var(--series-1)"></span>median</span>
+            <span class="key"><span class="swatch" style="background:var(--series-2)"></span>90th percentile</span>
+          </div>
+          <div class="bars" id="mode-bars"></div>
+          <div class="chart-foot">
+            <span class="chart-source">source · data/traces.db, planned n=76 · direct n=23</span>
+            <button class="table-toggle" data-target="mode-table">Show table</button>
+          </div>
+          <div class="table-scroll" id="mode-table" hidden>
+            <table>
+              <thead><tr><th>Mode</th><th class="num">Turns</th><th class="num">Median</th><th class="num">p90</th><th class="num">Max</th></tr></thead>
+              <tbody>
+                <tr><td>direct</td><td class="num">23</td><td class="num">1,915 ms</td><td class="num">2,878 ms</td><td class="num">3,695 ms</td></tr>
+                <tr><td>planned</td><td class="num">76</td><td class="num">3,397 ms</td><td class="num">9,150 ms</td><td class="num">34,963 ms</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spine">
+      <div class="callout">
+        <span class="callout-label">The interesting part</span>
+        <p>
+          A direct answer — no tools at all — still takes <strong>1.9 seconds</strong>.
+          That is the round trip to the model and nothing else, and it is the floor
+          nothing on this page can go below. Planning only adds ~1.5s to the median,
+          which means <strong>the planner is not the expensive part</strong>. The
+          tools are.
+        </p>
+      </div>
+      <p>
+        Three quarters of turns needed tools (74.5% planned, 22.5% direct), and of
+        those, <strong>55 of 76 used exactly one step</strong>. The dependency graph
+        and parallel execution built in Phase 5 are mostly idle capacity — real
+        requests are simpler than the machinery built to handle them.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <div class="sec-head reveal"><span class="sec-num">03</span><h2>Where the time actually goes</h2></div>
+
+    <div class="spine">
+      <p>
+        Every tool call is timed. Sorted by median, the spread is close to
+        300× — and that single fact is the whole optimisation story.
+      </p>
+    </div>
+
+    <div class="panel reveal">
+      <div class="panel-bar">
+        <h4>Median time per tool call</h4>
+        <span class="note">hover a bar for calls and worst case</span>
+      </div>
+      <div class="panel-body">
+        <div class="chart">
+          <div class="bars" id="tool-bars"></div>
+          <div class="chart-foot">
+            <span class="chart-source">source · step timings inside data/traces.db</span>
+            <button class="table-toggle" data-target="tool-table">Show table</button>
+          </div>
+          <div class="table-scroll" id="tool-table" hidden>
+            <table>
+              <thead><tr><th>Tool</th><th class="num">Calls</th><th class="num">Median</th><th class="num">Max</th></tr></thead>
+              <tbody id="tool-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spine">
+      <div class="callout warn">
+        <span class="callout-label">Read this the right way round</span>
+        <p>
+          <code>open_page</code> is not slow because the code is bad. It is slow
+          because it <strong>starts a browser and waits for a website</strong>, and
+          no amount of tuning changes that. Meanwhile <code>get_time</code> at 23 ms
+          is not worth a single minute of optimisation.
+        </p>
+      </div>
+      <p>
+        This is why the browser closes itself after five idle minutes, why images and
+        fonts are never downloaded, and why <code>search_web</code> is preferred over
+        <code>open_page</code> whenever a search can answer the question. Everything
+        else is already inside the noise floor of the model round trip.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <div class="sec-head reveal"><span class="sec-num">04</span><h2>Memory, and an honest complication</h2></div>
+
+    <div class="spine">
+      <p>
+        This is the constrained resource: a 7,915 MB machine with roughly 529 MB
+        free. But "how much RAM does Sid use" has two legitimate answers that differ
+        by a factor of fifty, and quoting only one of them would be dishonest.
+      </p>
+    </div>
+
+    <div class="panel reveal">
+      <div class="panel-bar">
+        <h4>Resident vs committed memory</h4>
+        <span class="note">measured while idle</span>
+      </div>
+      <div class="panel-body">
+        <div class="chart">
+          <div class="legend">
+            <span class="key"><span class="swatch" style="background:var(--series-1)"></span>resident — actually in RAM now</span>
+            <span class="key"><span class="swatch" style="background:var(--series-2)"></span>committed — reserved by the process</span>
+          </div>
+          <div class="bars" id="mem-bars"></div>
+          <div class="chart-foot">
+            <span class="chart-source">source · Get-Process WorkingSet64 / PrivateMemorySize64</span>
+            <button class="table-toggle" data-target="mem-table">Show table</button>
+          </div>
+          <div class="table-scroll" id="mem-table" hidden>
+            <table>
+              <thead><tr><th>Process</th><th class="num">Resident</th><th class="num">Committed</th></tr></thead>
+              <tbody>
+                <tr><td>Sid server</td><td class="num">8 MB</td><td class="num">284 MB</td></tr>
+                <tr><td>Wake listener</td><td class="num">5 MB</td><td class="num">765 MB</td></tr>
+                <tr><td>Ollama (idle)</td><td class="num">30 MB</td><td class="num">155 MB</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spine">
+      <div class="callout">
+        <span class="callout-label">Why the two numbers disagree so violently</span>
+        <p>
+          Windows <strong>trims the working set of idle processes</strong>, pushing
+          pages out to disk. Resident memory is what is physically in RAM right now;
+          committed is what the process has reserved, including a memory-mapped 68 MB
+          speech model that is mostly never touched. Neither number alone answers the
+          question — the truthful version is <em>"about 13 MB resident while idle,
+          and it will page back in when used."</em>
+        </p>
+      </div>
+
+      <p>
+        The browser is the one component big enough to change how the laptop feels,
+        and it is measured separately because it comes and goes:
+      </p>
+
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Browser state</th><th class="num">Chromium RAM</th></tr></thead>
+          <tbody>
+            <tr><td>not running</td><td class="num">0 MB</td></tr>
+            <tr><td>a normal page open</td><td class="num">260 MB</td></tr>
+            <tr><td>a long article open</td><td class="num">407 MB</td></tr>
+            <tr><td>after close_browser</td><td class="num">0 MB</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout warn">
+        <span class="callout-label">A measurement mistake worth copying the fix for</span>
+        <p>
+          The first reading here was <strong>803 MB</strong>, and it sent an hour into
+          optimising the wrong thing. It had been taken with
+          <code>Get-Process chrome*</code> — which matched the <em>user's own
+          Chrome</em>, fifteen processes of it. Playwright's binary is called
+          <code>chrome-headless-shell</code>. <strong>Measure the thing you think you
+          are measuring.</strong>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <div class="sec-head reveal"><span class="sec-num">05</span><h2>Disk, and what grows</h2></div>
+
+    <div class="spine">
+      <p>
+        After 102 turns, everything Sid knows about you fits in
+        <strong>305 KB</strong>. The models are 220× larger than the data.
+      </p>
+    </div>
+
+    <div class="table-scroll reveal">
+      <table>
+        <thead><tr><th>File</th><th class="num">Size</th><th>Holds</th><th>Grows?</th></tr></thead>
+        <tbody>
+          <tr><td>audit.db</td><td class="num">116 KB</td><td>Every action ever taken</td><td>Forever — it's the evidence</td></tr>
+          <tr><td>memory.db</td><td class="num">64 KB</td><td>Facts, turns, and their vectors</td><td>Slowly</td></tr>
+          <tr><td>traces.db</td><td class="num">64 KB</td><td>Per-turn timings and tokens</td><td>No — rolls off weekly</td></tr>
+          <tr><td>jobs.db</td><td class="num">28 KB</td><td>Background tasks</td><td>Slowly</td></tr>
+          <tr><td>push.db</td><td class="num">16 KB</td><td>Subscribed phones, signing key</td><td>No</td></tr>
+          <tr><td>triggers.db</td><td class="num">16 KB</td><td>Your schedules</td><td>No</td></tr>
+          <tr><td>vault.bin</td><td class="num">1 KB</td><td>Google tokens, DPAPI-encrypted</td><td>No</td></tr>
+          <tr><td>models/</td><td class="num">68 MB</td><td>The offline speech model</td><td>No — fixed</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="spine">
+      <p>
+        Only <code>audit.db</code> grows without bound, and that is deliberate: an
+        append-only log you can trim is not evidence. At the observed rate it costs
+        roughly a megabyte a year, which is not a problem worth engineering away.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <div class="sec-head reveal"><span class="sec-num">06</span><h2>Money and quota</h2></div>
+
+    <div class="spine">
+      <p>
+        Across all 102 turns Sid consumed <strong>88,253 input tokens and 1,664
+        output tokens</strong> — a median of 886 in and 15 out per turn. That
+        asymmetry is the shape of an agent rather than a chatbot: it reads a lot
+        (tool descriptions, memories, page text) and writes very little, because most
+        of its output is a short JSON plan.
+      </p>
+
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Resource</th><th class="num">Used</th><th>Cost</th></tr></thead>
+          <tbody>
+            <tr><td>Gemini free tier</td><td class="num">102 turns</td><td>₹0 — within the free allowance</td></tr>
+            <tr><td>Input tokens</td><td class="num">88,253</td><td>₹0</td></tr>
+            <tr><td>Output tokens</td><td class="num">1,664</td><td>₹0</td></tr>
+            <tr><td>Hosting</td><td class="num">—</td><td>₹0 — it is your own laptop</td></tr>
+            <tr><td>Ollama, if used instead</td><td class="num">—</td><td>₹0, and no network at all</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout warn">
+        <span class="callout-label">The real limit isn't money</span>
+        <p>
+          It's <strong>quota</strong>. Web search grounding has its own much smaller
+          free allowance, and it ran out during testing — the honest failure mode is
+          Sid saying so rather than pretending there were no results. One of the 102
+          turns errored for exactly this reason.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section class="spine">
+    <div class="sec-head reveal"><span class="sec-num">07</span><h2>What this budget says to do next</h2></div>
+
+    <ol>
+      <li><strong>Don't optimise the planner.</strong> A direct answer costs 1.9s and a planned one 3.4s. The gap is smaller than one page load.</li>
+      <li><strong>Prefer search over browsing.</strong> <code>search_web</code> at 473 ms versus <code>open_page</code> at 6.9s — an order of magnitude, for the same question.</li>
+      <li><strong>Keep the browser closed.</strong> It is the only component that meaningfully competes with the rest of the laptop for RAM.</li>
+      <li><strong>Leave the databases alone.</strong> 305 KB after 102 turns is not a problem in any timeframe worth planning for.</li>
+      <li><strong>Watch quota, not cost.</strong> Money is genuinely zero; the free allowance is what actually runs out.</li>
+    </ol>
+
+    <div class="callout">
+      <span class="callout-label">The honest summary</span>
+      <p>
+        Sid is cheap because it is small and because the expensive part — the model —
+        belongs to someone else's free tier. The moment that changes, the first
+        number to watch is 88,253 input tokens across 102 turns: roughly 900 tokens
+        of reading for every 15 written.
+      </p>
+    </div>
+  </section>
+
+  <div class="colophon">
+    <span>Sid — personal AI agent</span>
+    <span>102 turns measured</span>
+    <span><a href="./">Inside Sid</a> · <a href="build-ladder.html">Build Ladder</a></span>
+    <span><a href="https://github.com/siidakk/SidAI-Agent">Source on GitHub</a></span>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------------- data, straight from data/traces.db ---------------- */
+  var HISTO = [
+    { label: "<1s",  n: 0 },  { label: "1–2s",  n: 15 }, { label: "2–3s", n: 25 },
+    { label: "3–5s", n: 43 }, { label: "5–10s", n: 14 }, { label: "10–20s", n: 4 },
+    { label: ">20s", n: 1 }
+  ];
+  var MODES = [
+    { label: "direct",  median: 1915, p90: 2878, n: 23 },
+    { label: "planned", median: 3397, p90: 9150, n: 76 }
+  ];
+  var TOOLS = [
+    { t: "open_page",       calls: 8,  med: 6871, max: 31399 },
+    { t: "search_email",    calls: 1,  med: 6329, max: 6329 },
+    { t: "set_volume",      calls: 4,  med: 934,  max: 4003 },
+    { t: "play_on_youtube", calls: 18, med: 864,  max: 4001 },
+    { t: "read_page",       calls: 6,  med: 643,  max: 1457 },
+    { t: "search_web",      calls: 5,  med: 473,  max: 31400 },
+    { t: "open_url",        calls: 4,  med: 195,  max: 2256 },
+    { t: "open_app",        calls: 9,  med: 82,   max: 205 },
+    { t: "control_media",   calls: 2,  med: 63,   max: 93 },
+    { t: "schedule_task",   calls: 6,  med: 35,   max: 65 },
+    { t: "system_info",     calls: 5,  med: 33,   max: 36 },
+    { t: "stop_music",      calls: 2,  med: 32,   max: 40 },
+    { t: "list_files",      calls: 3,  med: 32,   max: 48 },
+    { t: "get_time",        calls: 20, med: 23,   max: 41 },
+    { t: "list_schedules",  calls: 3,  med: 22,   max: 22 },
+    { t: "click",           calls: 5,  med: 21,   max: 32 }
+  ];
+  var MEM = [
+    { label: "Sid server",    resident: 8,  committed: 284 },
+    { label: "Wake listener", resident: 5,  committed: 765 },
+    { label: "Ollama (idle)", resident: 30, committed: 155 }
+  ];
+
+  var S1 = "var(--series-1)", S2 = "var(--series-2)";
+  var RAMP = ["var(--ramp-1)","var(--ramp-2)","var(--ramp-3)","var(--ramp-4)"];
+
+  function ms(v) { return v >= 1000 ? (v/1000).toFixed(v >= 10000 ? 0 : 1) + " s" : v + " ms"; }
+
+  /* ---------------- histogram ---------------- */
+  (function () {
+    var host = document.getElementById("histo"), axis = document.getElementById("histo-axis"),
+        tb = document.getElementById("histo-tbody");
+    var max = Math.max.apply(null, HISTO.map(function (d) { return d.n; }));
+    var total = HISTO.reduce(function (a, d) { return a + d.n; }, 0);
+
+    HISTO.forEach(function (d, i) {
+      var col = document.createElement("div");
+      col.className = "col";
+      col.setAttribute("data-tip", d.label + "\n" + d.n + " turns  ·  " + Math.round(100*d.n/total) + "%");
+      col.setAttribute("tabindex", "0");
+
+      var count = document.createElement("div");
+      count.className = "count";
+      count.textContent = d.n || "";
+
+      var fill = document.createElement("div");
+      fill.className = "fill";
+      // Height is the honest encoding; colour only deepens along the ramp so
+      // the eye reads left-to-right as "slower", never as a second variable.
+      fill.style.height = (max ? (d.n / max) * 100 : 0) + "%";
+      fill.style.background = RAMP[Math.min(RAMP.length - 1, Math.floor(i / 2))];
+      if (reduced) fill.style.animation = "none", fill.style.transform = "none";
+
+      col.append(count, fill);
+      host.appendChild(col);
+
+      var s = document.createElement("span"); s.textContent = d.label; axis.appendChild(s);
+
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + d.label + "</td><td class='num'>" + d.n +
+                     "</td><td class='num'>" + Math.round(100*d.n/total) + "%</td>";
+      tb.appendChild(tr);
+    });
+  })();
+
+  /* ---------------- two-series bar rows ---------------- */
+  function pairedBars(host, rows, aKey, bKey, fmt) {
+    var max = Math.max.apply(null, rows.map(function (r) { return Math.max(r[aKey], r[bKey]); }));
+    rows.forEach(function (r) {
+      var row = document.createElement("div");
+      row.className = "bar-row";
+
+      var label = document.createElement("div");
+      label.className = "bar-label";
+      label.textContent = r.label;
+
+      var track = document.createElement("div");
+      track.className = "bar-track paired";
+      [[aKey, S1], [bKey, S2]].forEach(function (pair) {
+        var lane = document.createElement("div");
+        lane.className = "lane";
+        var fill = document.createElement("div");
+        fill.className = "bar-fill";
+        fill.style.width = (r[pair[0]] / max) * 100 + "%";
+        fill.style.background = pair[1];
+        if (reduced) { fill.style.animation = "none"; fill.style.transform = "none"; }
+        lane.appendChild(fill);
+        track.appendChild(lane);
+      });
+      track.setAttribute("tabindex", "0");
+      track.setAttribute("data-tip",
+        r.label + "\n" + aKey + ": " + fmt(r[aKey]) + "\n" + bKey + ": " + fmt(r[bKey]) +
+        (r.n ? "\nn = " + r.n : ""));
+
+      // Label BOTH series, not just the first. Labelling only series A while
+      // series B is the visually dominant bar makes the number look like it
+      // belongs to the wrong mark — which is exactly how it read on the
+      // memory chart, where 8 MB sat beside a bar drawn for 284 MB.
+      var val = document.createElement("div");
+      val.className = "bar-value";
+      val.innerHTML = '<span style="color:var(--ink)">' + fmt(r[aKey]) + '</span>' +
+                      '<span style="color:var(--ink-low)"> / ' + fmt(r[bKey]) + '</span>';
+
+      row.append(label, track, val);
+      host.appendChild(row);
+    });
+  }
+
+  pairedBars(document.getElementById("mode-bars"), MODES, "median", "p90", ms);
+  pairedBars(document.getElementById("mem-bars"), MEM, "resident", "committed",
+             function (v) { return v + " MB"; });
+
+  /* ---------------- single-series tool ranking ---------------- */
+  (function () {
+    var host = document.getElementById("tool-bars"), tb = document.getElementById("tool-tbody");
+    var max = Math.max.apply(null, TOOLS.map(function (d) { return d.med; }));
+
+    TOOLS.forEach(function (d) {
+      var row = document.createElement("div");
+      row.className = "bar-row";
+
+      var label = document.createElement("div");
+      label.className = "bar-label";
+      label.textContent = d.t;
+
+      var track = document.createElement("div");
+      track.className = "bar-track";
+      track.setAttribute("tabindex", "0");
+      track.setAttribute("data-tip",
+        d.t + "\nmedian " + ms(d.med) + "\nworst  " + ms(d.max) + "\n" + d.calls + " calls");
+
+      var fill = document.createElement("div");
+      fill.className = "bar-fill";
+      fill.style.width = (d.med / max) * 100 + "%";
+      fill.style.background = S1;
+      if (reduced) { fill.style.animation = "none"; fill.style.transform = "none"; }
+      track.appendChild(fill);
+
+      var val = document.createElement("div");
+      val.className = "bar-value";
+      val.textContent = ms(d.med);
+
+      row.append(label, track, val);
+      host.appendChild(row);
+
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + d.t + "</td><td class='num'>" + d.calls +
+                     "</td><td class='num'>" + d.med + " ms</td><td class='num'>" + d.max + " ms</td>";
+      tb.appendChild(tr);
+    });
+  })();
+
+  /* ---------------- table toggles ---------------- */
+  document.querySelectorAll(".table-toggle").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var el = document.getElementById(btn.dataset.target);
+      el.hidden = !el.hidden;
+      btn.textContent = el.hidden ? "Show table" : "Hide table";
+    });
+  });
+
+  /* ---------------- page chrome ---------------- */
+  var bar = document.getElementById("progress");
+  function onScroll() {
+    var h = document.documentElement, m = h.scrollHeight - h.clientHeight;
+    bar.style.width = (m > 0 ? (h.scrollTop / m) * 100 : 0) + "%";
+  }
+  addEventListener("scroll", onScroll, { passive: true }); onScroll();
+
+  var items = document.querySelectorAll(".reveal");
+  if (reduced || !("IntersectionObserver" in window)) {
+    items.forEach(function (el) { el.classList.add("in"); });
+  } else {
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.05 });
+    items.forEach(function (el) { io.observe(el); });
+  }
+})();
+</script>
+</body>
+</html>

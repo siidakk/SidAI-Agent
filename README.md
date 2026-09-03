@@ -7,6 +7,13 @@
 > **Five diagrams, no code required.**
 > Start there if you want to understand this without reading 10,000 lines.
 
+Two companion pages, same site:
+
+| | |
+|---|---|
+| 🪜 [**Build Ladder**](https://siidakk.github.io/SidAI-Agent/build-ladder.html) | Eleven phases — what each one added, what it rests on, and the bug that taught the lesson |
+| 📊 [**Runtime Budget**](https://siidakk.github.io/SidAI-Agent/runtime-budget.html) | What it actually costs to run, measured over 102 real turns: latency, memory, disk, money |
+
 ---
 
 **A self-hosted personal AI agent that runs entirely on your own laptop.**
