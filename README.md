@@ -34,8 +34,8 @@ finished — for free, with nothing leaving your machine that doesn't have to.
 ```
 
 Press **Ctrl+Shift+Space** anywhere, or say **"Hey Sid"** across the room.
-A small ring sits at the top of your screen and shows what Sid is doing —
-and moves over whatever it is about to click. Ask it to do something
+Your screen edges glow — pink, violet, blue — while Sid listens and works,
+then fade away. Invisible the rest of the time. Ask it to do something
 slow, close the laptop, and check the answer on your phone later.
 
 | | |
@@ -609,7 +609,7 @@ ignoring.
 | 9 | Proactive: triggers, schedules, notifications | ✅ done |
 | 10 | Full phone experience: push, voice, share-target | ✅ done |
 | 11 | Evals, traces, docs | ✅ done |
-| 12 | Screen vision, mouse control, on-screen ring | ✅ done |
+| 12 | Screen vision, mouse control, screen-edge glow | ✅ done |
 
 ---
 

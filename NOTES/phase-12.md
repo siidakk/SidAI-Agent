@@ -1,4 +1,4 @@
-# Phase 12 — Eyes, Hands, and a Ring on Screen
+# Phase 12 — Eyes, Hands, and a Glow at the Edges
 
 > Until now Sid could only touch things that offered it a door: an API, a
 > URL, a command. This is the phase where it can use **anything on the
@@ -15,7 +15,7 @@ didn't have.
 
 | File | What it is |
 |---|---|
-| `overlay.py` | The ring on screen, and the global hotkey |
+| `overlay.py` | The screen-edge glow, and the global hotkey |
 | `backend/screen.py` | Capturing the screen, and what that costs |
 | `backend/tools/vision.py` | `see_screen`, `find_on_screen` |
 | `backend/tools/pointer.py` | `click_at`, `move_mouse`, `scroll_at`, `drag_to`, `point_at` |
@@ -61,7 +61,96 @@ click ever lands in the wrong place, there is one line to look at.
 
 ---
 
-## 3. The ring
+## 3. The glow (and the ring it replaced)
+
+The first build put a small ring at the top of the screen **permanently**.
+It worked, and it was wrong: an always-visible widget is a widget you
+resent by the second day. The rewrite inverted it —
+
+> **Invisible unless Sid is doing something.**
+
+Press the hotkey and colour blooms inward from all four screen edges —
+pink, violet, blue — then fades out and disappears when Sid is done.
+
+### Why tkinter had to go
+
+The ring faked softness with concentric outlines, because a tkinter window
+on Windows has no real per-pixel alpha: only `-transparentcolor`, which
+makes one exact colour vanish and leaves hard edges everywhere else.
+
+**A glow is nothing but soft edges.** Faking that with hard-edged bands
+looks like exactly what it is. So the rewrite drops tkinter and calls
+`UpdateLayeredWindow` directly — the API behind every glassy Windows
+overlay, and the only way to lay a genuinely soft gradient over a desktop.
+
+### Four windows, not one
+
+A fullscreen layered window means pushing ~8 MB of RGBA every frame. Four
+thin edge strips cover the same visible area with a third of the pixels,
+and the middle of the screen — where nothing is drawn — costs nothing.
+
+Measured: **~11 ms to generate all four edges**, against a 50 ms budget at
+20fps.
+
+### Premultiplied alpha
+
+Windows wants BGRA with each colour channel already multiplied by its own
+alpha. Skip it and semi-transparent pixels come out too bright with a milky
+halo — the classic symptom, and worth recognising on sight.
+
+---
+
+## 3b. Four bugs in one overlay
+
+### Every window message threw
+
+```
+ctypes.ArgumentError: argument 4: OverflowError: int too long to convert
+```
+
+ctypes assumes an undeclared function takes and returns a C `int` — 32
+bits. Handles and `LPARAM` are 64. Four windows got created, none worked,
+and the message loop threw on every event.
+
+> **Declare `argtypes` and `restype` for every Win32 call.** It is not
+> optional on 64-bit.
+
+### The top edge hid behind the browser
+
+`WS_EX_TOPMOST` at creation is honoured inconsistently — the bottom edge
+drew over everything while the top one vanished behind a window.
+`SetWindowPos(HWND_TOPMOST)` is the reliable way to say it.
+
+### It lit up and stayed lit forever
+
+The glow was switched on by a `wake` event and meant to be switched off by
+an idle event **the server never sends**. So it bloomed and stayed — which
+is precisely the always-on behaviour the rewrite existed to remove.
+
+Fixed with a backstop: no news for 12 seconds and it fades itself out.
+
+> **Never let something visible depend solely on an event arriving.** Give
+> it its own way to switch off.
+
+### Six copies, all drawing over each other
+
+Each restart added an instance; only the first could hold the hotkey, so
+every other one looked broken. A named mutex fixes it — released by the OS
+on process death, so a crash can't leave a stale lock the way a lock-file
+would.
+
+The subtlety that cost a try: `GetLastError` is per-thread and is
+overwritten by the *next* API call, so it must be read through a DLL opened
+with `use_last_error=True` and checked immediately.
+
+**And a bug in my own shell command, worth recording:** the PowerShell I
+used to kill stray copies filtered on `CommandLine -like '*overlay.py*'` —
+which matched *the PowerShell process running that very command*. It killed
+itself, every time, and reported nothing but exit 255.
+
+---
+
+## 3c. The ring, as originally built
 
 A 74px ring at the top of the screen, above every window, that changes as
 Sid does: dim when idle, breathing when listening, a rotating arc while
