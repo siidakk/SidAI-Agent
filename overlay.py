@@ -113,6 +113,28 @@ HOTKEY_CHOICES = [
 HOTKEY_ID = 0xC0DE
 HOTKEY_NAME = "(none)"
 
+# ------------------------------------------------------- push to talk
+# ONE key, held down. Not a chord, and not a toggle.
+#
+# Silence detection is a heuristic and it is always wrong sometimes: it cut
+# you off when you paused to think, and kept recording when a fan started.
+# Holding a key removes the guess - the recording begins when you press and
+# ends when you let go, which is the one thing that can be known for sure.
+#
+# Right Ctrl by default because holding it ALONE does nothing anywhere in
+# Windows, so claiming it costs you nothing. Set AXON_PTT_KEY to change it.
+PTT_KEYS = {
+    "rctrl": 0xA3, "right ctrl": 0xA3,
+    "ralt": 0xA5, "right alt": 0xA5,
+    "rshift": 0xA1, "right shift": 0xA1,
+    "f9": 0x78, "f8": 0x77, "f10": 0x79,
+    "scrolllock": 0x91, "pause": 0x13,
+    "num0": 0x60, "numpad0": 0x60,
+    "numlock": 0x90,
+}
+PTT_NAME = os.getenv("AXON_PTT_KEY", "rctrl").strip().lower()
+PTT_VK = PTT_KEYS.get(PTT_NAME, 0xA3)
+
 # Apple-Intelligence-ish: warm pink through violet into blue and cyan.
 # Sid's own cyan is in there so the two still read as one product.
 PALETTES = {
@@ -371,6 +393,70 @@ class GlowStrip:
             pass
 
 
+class Caption:
+    """
+    One word at the top of the screen, and never more than one.
+
+    The brief was "single word updates, nothing else", and that is the
+    right instinct: a caption on a screen edge is glanced at, not read. A
+    sentence there is something you have to stop and parse, which defeats
+    the point of not opening a window.
+    """
+
+    def __init__(self, screen_w: int):
+        self.w, self.h = 300, 62
+        self.win = GlowStrip((screen_w - self.w) // 2, 18, self.w, self.h)
+        self.text = ""
+        self._font = None
+
+    def _get_font(self):
+        if self._font is None:
+            from PIL import ImageFont
+            for name in ("segoeuisl.ttf", "segoeui.ttf", "arial.ttf"):
+                try:
+                    self._font = ImageFont.truetype(name, 26)
+                    break
+                except Exception:
+                    continue
+            if self._font is None:
+                self._font = ImageFont.load_default()
+        return self._font
+
+    def set(self, text: str, alpha: float = 1.0) -> None:
+        from PIL import Image, ImageDraw
+
+        text = (text or "").strip()
+        if not text or alpha <= 0.02:
+            self.win.show(False)
+            self.text = ""
+            return
+
+        image = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        font = self._get_font()
+
+        box = draw.textbbox((0, 0), text, font=font)
+        tw, th = box[2] - box[0], box[3] - box[1]
+        pad_x, pad_y = 26, 13
+        bw, bh = tw + pad_x * 2, th + pad_y * 2
+        x0, y0 = (self.w - bw) // 2, (self.h - bh) // 2
+
+        a = int(190 * alpha)
+        draw.rounded_rectangle([x0, y0, x0 + bw, y0 + bh], radius=bh // 2,
+                               fill=(10, 14, 22, a))
+        draw.rounded_rectangle([x0, y0, x0 + bw, y0 + bh], radius=bh // 2,
+                               outline=(150, 190, 255, int(70 * alpha)), width=1)
+        draw.text((x0 + pad_x - box[0], y0 + pad_y - box[1]), text,
+                  font=font, fill=(235, 242, 250, int(255 * alpha)))
+
+        self.win.show(True)
+        self.win.paint(np.asarray(image))
+        self.text = text
+
+    def destroy(self) -> None:
+        self.win.destroy()
+
+
 # ==========================================================================
 #  Making the light
 # ==========================================================================
@@ -484,6 +570,8 @@ class Glow:
         self.right = GlowStrip(self.sw - g, 0, g, self.sh)
         self.depth = g
         self.strips = (self.top, self.bottom, self.left, self.right)
+        self.caption = Caption(self.sw)
+        self.word = ""          # the single word shown, if any
 
     # ---------------- state ----------------
 
@@ -494,6 +582,13 @@ class Glow:
         self.last_news = time.time()
         if self.debug:
             print(f"  glow on  ({state})", flush=True)
+
+    def say(self, word: str) -> None:
+        """Show one word. Empty hides the caption."""
+        self.word = word or ""
+        self.last_news = time.time()
+        if self.debug and word:
+            print(f"  caption: {word}", flush=True)
 
     def set_state(self, state: str) -> None:
         if state in PALETTES:
@@ -521,6 +616,8 @@ class Glow:
                 break
             if kind == "wake":
                 self.wake()
+            elif kind == "word":
+                self.say(value)
             elif kind == "state":
                 self.set_state(value)
             elif kind == "dismiss":
@@ -547,12 +644,18 @@ class Glow:
         if self.intensity <= 0.001:
             for s in self.strips:
                 s.show(False)
+            self.caption.set("")
             self.state = "hidden"
             self.hide_at = 0.0
             return
 
         self.phase += 1.0 / FPS
         palette = PALETTES.get(self.state, PALETTES["listening"])
+
+        # The caption fades with the glow, so they arrive and leave together
+        # rather than the word hanging on over a dark screen.
+        if self.caption.text != self.word or self.word:
+            self.caption.set(self.word, self.intensity)
         # ease-in-out so the bloom itself feels lit rather than wiped on
         eased = self.intensity * self.intensity * (3 - 2 * self.intensity)
 
@@ -655,44 +758,72 @@ def claim_hotkey(debug: bool = False) -> bool:
     return False
 
 
-def _do_wake() -> None:
+def _held() -> bool:
+    """
+    Is the push-to-talk key down right now?
+
+    GetAsyncKeyState is asked about ONE key and nothing else. That is the
+    same principle as using RegisterHotKey rather than a keyboard hook: a
+    program that runs all day should never be in a position to see what you
+    are typing, even accidentally.
+    """
+    return bool(user32.GetAsyncKeyState(PTT_VK) & 0x8000)
+
+
+def _do_turn(glow) -> None:
+    """
+    A whole spoken exchange, driven by the key being held.
+
+    The hotkey used to only POST /api/wake, whose job is telling an
+    ALREADY-OPEN Sid page to switch its microphone on. With no page open -
+    the normal case - the glow lit up and nothing else happened, because
+    the ears lived in the browser.
+    """
     start_server_if_needed()
-    post("/api/wake")
+    post("/api/wake")                     # harmless if no page is listening
+
+    try:
+        import voice_session
+    except Exception as exc:
+        _log(f"voice unavailable: {exc}")
+        glow.events.put(("word", "no voice"))
+        glow.events.put(("dismiss", None))
+        return
+
+    def state(word):
+        glow.events.put(("word", word))
+        glow.events.put(("state",
+                         {"listening": "listening", "thinking": "thinking",
+                          "working": "thinking", "speaking": "speaking"}
+                         .get(word, "error")))
+
+    try:
+        result = voice_session.run_turn_held(_held, on_state=state)
+    except Exception as exc:
+        _log(f"voice turn failed: {exc}")
+        glow.events.put(("word", "failed"))
+        glow.events.put(("dismiss", None))
+        return
+
+    if result.get("ok"):
+        _log(f"heard: {result.get('heard','')[:80]}")
+        glow.events.put(("word", "done"))
+    else:
+        _log(f"turn ended: {result.get('why','')}")
+        glow.events.put(("word", "nothing"))
+
+    glow.events.put(("dismiss", None))
 
 
-def already_running() -> bool:
-    """
-    Refuse to be the second copy.
-
-    Four instances stacked up during development - each start-up added one,
-    they all drew over each other, and only the first could hold the hotkey
-    so the rest looked broken. A named mutex is the standard Windows answer:
-    unique per session, and released by the OS when the process dies, so a
-    crash cannot leave a stale lock behind the way a lock-file would.
-
-    The subtlety that cost a try: GetLastError is per-thread and is
-    overwritten by the NEXT api call, so it has to be read through a DLL
-    opened with use_last_error=True and checked IMMEDIATELY. Calling
-    windll.kernel32.GetLastError() afterwards reads a value something else
-    has already reset.
-    """
-    global _MUTEX
-    ERROR_ALREADY_EXISTS = 183
-
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    k32.CreateMutexW.argtypes = [wt.LPVOID, wt.BOOL, wt.LPCWSTR]
-    k32.CreateMutexW.restype = wt.HANDLE
-
-    handle = k32.CreateMutexW(None, False, "Global\SidGlowOverlay")
-    err = ctypes.get_last_error()          # read it NOW, before anything else
-    if not handle:
-        return False
-
-    _MUTEX = handle                        # held for the life of the process
-    return err == ERROR_ALREADY_EXISTS
+_turn_running = threading.Event()
 
 
-_MUTEX = None
+def _run_turn_guarded(glow) -> None:
+    _turn_running.set()
+    try:
+        _do_turn(glow)
+    finally:
+        _turn_running.clear()
 
 
 def main() -> None:
@@ -709,7 +840,7 @@ def main() -> None:
             print("Sid's glow is already running.", flush=True)
         return
 
-    _log("starting")
+    _log(f"starting - push to talk on {PTT_NAME} (vk {PTT_VK:#x})")
     glow = Glow(debug=args.debug or args.demo)
 
     if args.demo:
@@ -730,7 +861,8 @@ def main() -> None:
     threading.Thread(target=watch_events, args=(glow,), daemon=True).start()
 
     if args.debug:
-        print(f"Sid glow ready. {HOTKEY_NAME} to summon. Ctrl+C to stop.", flush=True)
+        print(f"Sid ready. Hold {PTT_NAME.upper()} to talk "
+              f"(or press {HOTKEY_NAME}). Ctrl+C to stop.", flush=True)
         glow.wake()
         glow.dismiss()
 
@@ -739,13 +871,28 @@ def main() -> None:
     # from a thread that does not own it.
     msg = wt.MSG()
     frame_time = 1.0 / FPS
+    was_down = False
+
     while True:
+        # The old chord still works, for anyone who prefers a toggle.
         while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
-            if msg.message == 0x0312:                      # WM_HOTKEY
+            if msg.message == 0x0312 and not _turn_running.is_set():
                 glow.wake()
-                threading.Thread(target=_do_wake, daemon=True).start()
+                threading.Thread(target=_run_turn_guarded,
+                                 args=(glow,), daemon=True).start()
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
+
+        # PUSH TO TALK. Polled rather than hooked: RegisterHotKey only ever
+        # reports the press, and this needs the release too - that is what
+        # ends the recording.
+        down = _held()
+        if down and not was_down and not _turn_running.is_set():
+            glow.wake()
+            glow.say("listening")
+            threading.Thread(target=_run_turn_guarded,
+                             args=(glow,), daemon=True).start()
+        was_down = down
 
         glow.step()
         time.sleep(frame_time)

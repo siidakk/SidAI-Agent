@@ -33,9 +33,10 @@ finished — for free, with nothing leaving your machine that doesn't have to.
 "set volume to 30"          "lock my pc"          "stop the music"
 ```
 
-Press **Ctrl+Shift+Space** anywhere, or say **"Hey Sid"** across the room.
-Your screen edges glow — pink, violet, blue — while Sid listens and works,
-then fade away. Invisible the rest of the time. Ask it to do something
+**Hold Right Ctrl and talk.** Let go and it acts. Your screen edges glow
+while it listens, with a single word at the top — *listening*, *thinking*,
+*working* — and it answers out loud. No window opens. Invisible the rest of
+the time. (Or say **"Hey Sid"**.) Ask it to do something
 slow, close the laptop, and check the answer on your phone later.
 
 | | |
