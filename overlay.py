@@ -815,6 +815,39 @@ def _do_turn(glow) -> None:
     glow.events.put(("dismiss", None))
 
 
+_MUTEX = None
+
+
+def already_running() -> bool:
+    """
+    Refuse to be the second copy.
+
+    Six instances stacked up during development - each start-up added one,
+    they drew over each other, and only the first could hold the hotkey so
+    the rest looked broken. A named mutex is the standard Windows answer:
+    unique per session, and released by the OS when the process dies, so a
+    crash cannot leave a stale lock behind the way a lock-file would.
+
+    The subtlety that cost a try: GetLastError is per-thread and is
+    overwritten by the NEXT api call, so it has to be read through a DLL
+    opened with use_last_error=True and checked immediately.
+    """
+    global _MUTEX
+    ERROR_ALREADY_EXISTS = 183
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateMutexW.argtypes = [wt.LPVOID, wt.BOOL, wt.LPCWSTR]
+    k32.CreateMutexW.restype = wt.HANDLE
+
+    handle = k32.CreateMutexW(None, False, "Global\\SidGlowOverlay")
+    err = ctypes.get_last_error()          # read it NOW, before anything else
+    if not handle:
+        return False
+
+    _MUTEX = handle                        # held for the life of the process
+    return err == ERROR_ALREADY_EXISTS
+
+
 _turn_running = threading.Event()
 
 
