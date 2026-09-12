@@ -33,14 +33,16 @@ finished — for free, with nothing leaving your machine that doesn't have to.
 "set volume to 30"          "lock my pc"          "stop the music"
 ```
 
-Say **"Hey Sid"** across the room and it wakes up. Ask it to do something
+Press **Ctrl+Shift+Space** anywhere, or say **"Hey Sid"** across the room.
+A small ring sits at the top of your screen and shows what Sid is doing —
+and moves over whatever it is about to click. Ask it to do something
 slow, close the laptop, and check the answer on your phone later.
 
 | | |
 |---|---|
 | **Runs on** | One Windows laptop, 8 GB RAM |
 | **Costs** | Nothing — free API tier, or fully offline via Ollama |
-| **Tools** | 42 · 16 read, 22 act, 4 requiring your approval |
+| **Tools** | 50 · 20 read, 26 act, 4 requiring your approval |
 | **Interface** | Vanilla HTML/CSS/JS — no framework, no build step |
 | **Storage** | 6 SQLite files in one folder. Nothing in the cloud. |
 | **Brains** | Gemini · Ollama (offline) · Claude — swap with a dropdown |
@@ -315,6 +317,11 @@ py check.py --tools
 | `click` / `fill` | act | "click the search button", "type Manipal in the box" |
 | `close_browser` | act | "close the browser" — frees ~260 MB |
 | `schedule_task` | act | "every morning at 7:30, check my calendar" |
+| `see_screen` | read | "what's on my screen?", "what does this error say?" |
+| `find_on_screen` | read | finds a button and returns its coordinates |
+| `click_at` / `move_mouse` | act | clicks anything, anywhere — cursor glides so you can see it |
+| `scroll_at` / `drag_to` | act | scroll a window, drag a slider or a timeline clip |
+| `point_at` | read | "where's the settings button?" — the ring moves there |
 | `list_schedules` / `cancel_schedule` | read/act | "what's automatic?", "cancel Morning ping" |
 
 Adding a tool is one function with a docstring — see `NOTES/phase-2.md` §4.
@@ -602,6 +609,7 @@ ignoring.
 | 9 | Proactive: triggers, schedules, notifications | ✅ done |
 | 10 | Full phone experience: push, voice, share-target | ✅ done |
 | 11 | Evals, traces, docs | ✅ done |
+| 12 | Screen vision, mouse control, on-screen ring | ✅ done |
 
 ---
 

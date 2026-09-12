@@ -142,12 +142,19 @@ def open_app(name: str) -> str:
         name: What to open, e.g. "notepad", "calculator", "C:/Users/Malika/Downloads"
     """
     # Friendly names -> what Windows actually calls them.
+    # ".exe" matters on Windows 11. `Start-Process notepad` opened a
+    # "Select an app to open 'notepad'" dialog instead of Notepad, because
+    # the bare word is resolved as a document rather than a program.
+    # Naming the executable removes the ambiguity.
     ALIASES = {
-        "calculator": "calc", "notepad": "notepad", "paint": "mspaint",
-        "files": "explorer", "file explorer": "explorer", "explorer": "explorer",
-        "settings": "ms-settings:", "control panel": "control",
-        "task manager": "taskmgr", "cmd": "cmd", "terminal": "wt",
+        "calculator": "calc.exe", "calc": "calc.exe",
+        "notepad": "notepad.exe", "paint": "mspaint.exe",
+        "files": "explorer.exe", "file explorer": "explorer.exe",
+        "explorer": "explorer.exe",
+        "settings": "ms-settings:", "control panel": "control.exe",
+        "task manager": "taskmgr.exe", "cmd": "cmd.exe", "terminal": "wt.exe",
         "camera": "microsoft.windows.camera:", "browser": "chrome",
+        "spotify": "spotify", "word": "winword", "excel": "excel",
     }
     target = ALIASES.get(name.lower().strip(), name.strip())
 
@@ -163,7 +170,30 @@ def open_app(name: str) -> str:
     except Exception as exc:
         return f"Could not open '{name}': {exc}"
 
-    return f"Opened {name}."
+    # DON'T CLAIM SUCCESS WITHOUT CHECKING.
+    #
+    # This used to return "Opened notepad." unconditionally - including the
+    # time it actually produced a "Select an app" dialog and opened nothing.
+    # The model then confidently told the user Notepad was open, and the
+    # next tool call failed for reasons that made no sense.
+    #
+    # Launching is asynchronous, so wait a beat and ask the window manager
+    # whether anything new is there.
+    import time as _time
+
+    from .. import windows as _win
+
+    before = {h for h, _t in _win.visible_windows()}
+    _time.sleep(1.8)
+    fresh = [t for h, t in _win.visible_windows() if h not in before]
+    if fresh:
+        return f"Opened {name}. New window: {fresh[-1][:60]}"
+
+    # No new window is not necessarily failure - it may already have been
+    # running, or be slow. Say what is true rather than guessing either way.
+    return (f"Asked Windows to open '{name}', but no new window appeared "
+            f"within 2s. It may already be running, or still be starting. "
+            f"Use see_screen to check before acting on it.")
 
 
 @tool(tier="read")

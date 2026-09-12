@@ -250,4 +250,5 @@ async def run(name: str, arguments: dict, approve=None, task_id=None) -> str:
 # Importing these modules is what actually runs the @tool decorators and
 # fills REGISTRY. Add a new file here and its tools appear automatically.
 from . import (basic, browser, computer, files, gcal,  # noqa: E402,F401
-               gmail, media, memory_tools, schedule_tools, web)
+               gmail, media, memory_tools, pointer, schedule_tools,
+               vision, web)

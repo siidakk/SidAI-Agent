@@ -3,7 +3,8 @@ install.py — put Sid on your Desktop and Start Menu. Run once.
 
     py install.py              add Desktop + Start Menu shortcuts
     py install.py --startup    also launch Sid when Windows starts
-    py install.py --listener   run the "Hey Jarvis" listener at startup
+    py install.py --listener   run the "Hey Sid" listener at startup
+    py install.py --ring       on-screen ring + global hotkey at startup
     py install.py --remove     take all of it back off
 
 A Windows shortcut (.lnk) is a small binary file, so you can't just write one
@@ -88,6 +89,35 @@ $s.Save()
         print(f"  FAILED {link}: {result.stderr.strip()[:200]}")
 
 
+def overlay_running() -> bool:
+    """Is the on-screen ring already up? Two would draw on top of each other."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "
+             "'*overlay.py*' }).ProcessId"],
+            capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return bool((out.stdout or "").strip())
+    except Exception:
+        return False
+
+
+def start_overlay() -> None:
+    """Launch the ring. It is what gives Sid a hotkey, so start it early."""
+    import subprocess
+    if overlay_running():
+        print("  the ring is already running")
+        return
+    subprocess.Popen(
+        [pythonw(), str(ROOT / "overlay.py")],
+        cwd=str(ROOT), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL)
+    print("  the ring is up - press the hotkey to wake Sid (see logs/overlay.log)")
+
+
 def listener_running() -> bool:
     """Is a wake-word listener already running? Avoids starting a second one."""
     result = subprocess.run(
@@ -122,7 +152,7 @@ def remove() -> None:
         # Axon.lnk - so both sat on the Desktop and the stale one still got
         # clicked. Cleaning up previous names is part of renaming anything
         # that leaves files behind.
-        for name in ("Sid.lnk", "Sid Listener.lnk",
+        for name in ("Sid.lnk", "Sid Listener.lnk", "Sid Ring.lnk",
                      "Axon.lnk", "Axon Listener.lnk"):
             link = folder / name
             if link.exists():
@@ -163,6 +193,13 @@ def main() -> None:
         # reboot - which is exactly what happened. Installing something and
         # having it not run is a bad default.
         start_listener()
+
+    if "--ring" in sys.argv or "--overlay" in sys.argv:
+        make_shortcut(STARTUP, "Sid Ring", ROOT / "overlay.py")
+        print("  the ring will start with Windows")
+        # Same reasoning as the listener: install it AND start it now, or it
+        # looks broken until the next reboot.
+        start_overlay()
 
     print("\nDone. Double-click Sid on your Desktop.")
     print("The server starts itself and Sid opens in its own window.")
