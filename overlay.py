@@ -71,7 +71,7 @@ sys.path.insert(0, str(ROOT))
 from backend import config  # noqa: E402
 
 # How far the glow reaches in from each edge.
-GLOW = 190
+GLOW = 210
 
 # Frames per second. 20 is plenty for something this soft - the eye reads
 # a slow colour drift, not motion.
@@ -375,37 +375,79 @@ class GlowStrip:
 #  Making the light
 # ==========================================================================
 
-def _ramp(palette, t: float, n: int) -> np.ndarray:
-    """A looping colour ramp of n samples, drifting with t."""
+def _ramp(palette, pos: np.ndarray) -> np.ndarray:
+    """Sample a looping colour ramp at each position in `pos` (0-1)."""
     stops = np.array(palette + [palette[0]], dtype=np.float32)      # wrap round
-    pos = (np.linspace(0, 1, n, dtype=np.float32) + t) % 1.0
-    scaled = pos * (len(stops) - 1)
+    scaled = (pos % 1.0) * (len(stops) - 1)
     i = np.floor(scaled).astype(int)
     f = (scaled - i)[:, None]
     return stops[i] * (1 - f) + stops[np.minimum(i + 1, len(stops) - 1)] * f
 
 
-def edge_frame(length: int, depth: int, palette, t: float,
-               intensity: float, horizontal: bool) -> np.ndarray:
+# How many comets travel the border, and how fast. Two, opposite each
+# other, because one alone makes three sides look abandoned while it is on
+# the fourth.
+COMETS = 2
+ORBIT_SECONDS = 4.5          # time for one full lap of the screen
+COMET_WIDTH = 0.085          # fraction of the perimeter the head covers
+TAIL = 2.2                   # how much longer the trail is than the head
+
+# How lit the border is where no comet currently is. Kept low: the first
+# attempt used 0.30 with a tail covering 42% of the perimeter, and two of
+# those simply added up to a uniform band - technically animated, visibly
+# static. A travelling light needs somewhere dark to travel through.
+BASE_GLOW = 0.22
+
+
+def edge_rgba(s_norm: np.ndarray, depth: int, palette, t: float,
+              intensity: float, horizontal: bool) -> np.ndarray:
     """
-    One strip of glow.
+    One strip of glow, lit by light travelling around the whole border.
 
-    Brightest exactly at the screen edge, falling away inward on a curve -
-    a linear fade reads as a flat coloured band, which looks like a bug
-    rather than a glow.
+    `s_norm` is each column's position along the SCREEN PERIMETER, 0 to 1 -
+    not along this edge. That is the whole trick: the four strips are drawn
+    separately but share one coordinate system, so a comet crossing from the
+    top edge onto the right edge is continuous rather than restarting.
+
+    Brightness falls away inward on a curve. A linear fade reads as a flat
+    coloured band, which looks like a bug rather than a glow.
     """
-    fall = ((1.0 - np.linspace(0.0, 1.0, depth, dtype=np.float32)) ** 2.1)[:, None]
-    colours = _ramp(palette, t, length)                              # (length,3)
+    length = s_norm.shape[0]
 
-    # A slow breathing wave along the edge, so it never looks like a static
-    # gradient someone pasted on.
-    wave = 0.78 + 0.22 * np.sin(
-        np.linspace(0, math.pi * 3, length, dtype=np.float32) + t * 6.0)
-    colours = colours * wave[:, None]
+    # --- the travelling light -------------------------------------------
+    head = (t / ORBIT_SECONDS) % 1.0
+    glow_along = np.zeros(length, dtype=np.float32)
 
-    field = fall * intensity                                          # (depth,1)
+    for k in range(COMETS):
+        centre = (head + k / COMETS) % 1.0
+        # Distance around a LOOP, so a comet spanning the wrap-point does
+        # not tear in half at the top-left corner.
+        d = np.abs(s_norm - centre)
+        d = np.minimum(d, 1.0 - d)
+
+        # Signed version, so the trail can lag behind the head rather than
+        # being symmetric - a symmetric blob reads as a pulse, not motion.
+        signed = (s_norm - centre + 0.5) % 1.0 - 0.5
+        width = np.where(signed < 0, COMET_WIDTH * TAIL, COMET_WIDTH)
+        glow_along += np.exp(-(d / width) ** 2)
+
+    glow_along = np.clip(glow_along, 0.0, 1.15)
+
+    # A dim band everywhere, so the border is always faintly lit and the
+    # comets ride on top of it instead of leaving gaps of nothing.
+    along = BASE_GLOW + (1.0 - BASE_GLOW) * glow_along
+
+    # --- colour flows around with the light ------------------------------
+    colours = _ramp(palette, s_norm * 1.25 + t * 0.11)               # (length,3)
+
+    # --- inward falloff ---------------------------------------------------
+    fall = ((1.0 - np.linspace(0.0, 1.0, depth, dtype=np.float32)) ** 1.9)[:, None]
+
+    field = fall * (along[None, :] * intensity)                      # (depth,length)
+    field = np.clip(field, 0.0, 1.0)
+
     rgb = (colours[None, :, :] * field[:, :, None]).astype(np.uint8)
-    alpha = (np.broadcast_to(field, (depth, length)) * 255).astype(np.uint8)
+    alpha = (field * 255).astype(np.uint8)
     frame = np.dstack([rgb, alpha])
 
     if horizontal:
@@ -514,15 +556,39 @@ class Glow:
         # ease-in-out so the bloom itself feels lit rather than wiped on
         eased = self.intensity * self.intensity * (3 - 2 * self.intensity)
 
-        top = edge_frame(self.sw, self.depth, palette, self.phase * 0.06,
-                         eased * 1.0, True)
-        self.top.show(True); self.top.paint(top)
-        self.bottom.show(True); self.bottom.paint(top[::-1].copy())
+        # ONE coordinate system for all four edges: walk the perimeter
+        # clockwise from the top-left corner. Each strip gets the slice of
+        # it that belongs to that edge, so light crossing a corner carries
+        # straight on instead of jumping.
+        #
+        #   top    left -> right      0            .. W
+        #   right  top  -> bottom     W            .. W+H
+        #   bottom right-> left       W+H          .. 2W+H
+        #   left   bottom-> top       2W+H         .. 2W+2H
+        W, H = self.sw, self.sh
+        perim = 2.0 * (W + H)
+        t = self.phase
 
-        side = edge_frame(self.sh, self.depth, palette, self.phase * 0.06 + 0.25,
-                          eased * 0.92, False)
-        self.left.show(True); self.left.paint(side)
-        self.right.show(True); self.right.paint(side[:, ::-1].copy())
+        s_top = np.linspace(0, W, W, dtype=np.float32) / perim
+        s_right = (W + np.linspace(0, H, H, dtype=np.float32)) / perim
+        s_bottom = (W + H + np.linspace(0, W, W, dtype=np.float32)) / perim
+        s_left = (2 * W + H + np.linspace(0, H, H, dtype=np.float32)) / perim
+
+        self.top.show(True)
+        self.top.paint(edge_rgba(s_top, self.depth, palette, t, eased, True))
+
+        # bottom runs right->left, so its own pixels are the reverse of the
+        # perimeter order; flip the result back to screen order.
+        self.bottom.show(True)
+        self.bottom.paint(
+            edge_rgba(s_bottom, self.depth, palette, t, eased, True)[::-1, ::-1].copy())
+
+        self.right.show(True)
+        self.right.paint(edge_rgba(s_right, self.depth, palette, t, eased * 0.95, False)[:, ::-1].copy())
+
+        # left runs bottom->top, so flip vertically.
+        self.left.show(True)
+        self.left.paint(edge_rgba(s_left, self.depth, palette, t, eased * 0.95, False)[::-1].copy())
 
 
 # ==========================================================================

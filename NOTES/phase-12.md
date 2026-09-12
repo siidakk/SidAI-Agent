@@ -83,6 +83,35 @@ looks like exactly what it is. So the rewrite drops tkinter and calls
 `UpdateLayeredWindow` directly — the API behind every glassy Windows
 overlay, and the only way to lay a genuinely soft gradient over a desktop.
 
+### The light travels
+
+A static bloom reads as a decoration; a moving one reads as *something is
+happening*. Two comets orbit the screen border 180° apart, one lap every
+4.5 seconds.
+
+The trick that makes it work is **one coordinate system for four windows**.
+Each strip knows its position along the whole screen *perimeter*, 0 to 1 —
+not along its own edge:
+
+```
+top     left  → right     0        .. W
+right   top   → bottom    W        .. W+H
+bottom  right → left      W+H      .. 2W+H
+left    bottom→ top       2W+H     .. 2W+2H
+```
+
+So a comet crossing from the top edge onto the right edge carries straight
+on round the corner instead of restarting. Distance is measured *around the
+loop*, so a comet sitting on the wrap point doesn't tear in half at the
+top-left corner. The trail is asymmetric — longer behind the head than in
+front — because a symmetric blob reads as a pulse rather than motion.
+
+**The first attempt was technically animated and visibly static.** Base
+glow 0.30, a tail covering 42% of the perimeter, two of them: they simply
+added up to a uniform band. A travelling light needs somewhere dark to
+travel through. Measured after the fix: the bright spot moves across
+**59–75% of the screen width in 4.5 seconds**.
+
 ### Four windows, not one
 
 A fullscreen layered window means pushing ~8 MB of RGBA every frame. Four
