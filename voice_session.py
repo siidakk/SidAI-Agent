@@ -269,7 +269,20 @@ def transcribe(audio: bytes) -> str:
     return final.strip()
 
 
-def ask_sid(text: str, conversation: str = "voice") -> str:
+# The SAME conversation the app uses.
+#
+# This was "voice", and that one word made the two halves of Sid into two
+# different assistants. The app had 349 messages of history; the key had
+# its own 64. Ask something by voice, then open the app, and it had no idea
+# what you had just said - because as far as the server was concerned, a
+# different person was talking.
+#
+# One conversation means one memory, one thread, one assistant that happens
+# to have two doors.
+APP_CONVERSATION = "default"
+
+
+def ask_sid(text: str, conversation: str = APP_CONVERSATION) -> str:
     """Send it to Sid and collect the reply off the stream."""
     body = {"messages": [{"role": "user", "content": text}],
             "conversation": conversation}
@@ -277,6 +290,8 @@ def ask_sid(text: str, conversation: str = "voice") -> str:
         f"http://127.0.0.1:{config.PORT}/api/chat",
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"})
+
+    _announce("user", text)
 
     reply: list[str] = []
     with urllib.request.urlopen(req, timeout=240) as stream:
@@ -290,7 +305,30 @@ def ask_sid(text: str, conversation: str = "voice") -> str:
                 continue
             if event.get("type") == "text":
                 reply.append(event["text"])
-    return "".join(reply).strip()
+
+    answer = "".join(reply).strip()
+    _announce("assistant", answer)
+    return answer
+
+
+def _announce(role: str, text: str) -> None:
+    """
+    Tell any open Sid window what just happened by voice.
+
+    Without this, a turn spoken into the hotkey never appeared on screen,
+    so the two doors into Sid still *looked* like different assistants even
+    once they shared a conversation.
+    """
+    if not text:
+        return
+    try:
+        body = json.dumps({"role": role, "text": text}).encode()
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{config.PORT}/api/voice-turn",
+            data=body, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5).close()
+    except Exception:
+        pass          # a window not being open is the normal case
 
 
 def speak(text: str) -> None:

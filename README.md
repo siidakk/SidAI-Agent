@@ -33,10 +33,13 @@ finished — for free, with nothing leaving your machine that doesn't have to.
 "set volume to 30"          "lock my pc"          "stop the music"
 ```
 
-**Hold Right Ctrl and talk.** Let go and it acts. Your screen edges glow
-while it listens, with a single word at the top — *listening*, *thinking*,
-*working* — and it answers out loud. No window opens. Invisible the rest of
-the time. (Or say **"Hey Sid"**.) Ask it to do something
+**Two doors, one assistant.** Open the app and type, or **hold Right Ctrl**
+and talk — same server, same 50 tools, **same conversation**. Ask something
+by voice and the app already knows about it.
+
+Say **"Hey Sid"** and it opens the app. Turn on **hands-free** in the
+Activity panel and it answers with just the screen-edge glow instead, no
+window at all. Ask it to do something
 slow, close the laptop, and check the answer on your phone later.
 
 | | |

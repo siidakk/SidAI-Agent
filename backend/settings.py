@@ -43,6 +43,18 @@ DEFAULTS = {
     # needing permission to change the volume would make Sid unusable — but
     # it's here for anyone who wants a tighter leash.
     "confirm_act": False,
+
+    # HANDS-FREE. What "Hey Sid" does when no window is open.
+    #
+    #   False - open the app window, as it always did. You get the full
+    #           interface: transcript, activity, schedules.
+    #   True  - don't open anything. Answer out loud with just the glow,
+    #           exactly as the push-to-talk key does.
+    #
+    # Both modes do identical WORK: same server, same 50 tools, and since
+    # the voice path was moved onto the app's own conversation, the same
+    # memory too. The only difference is whether a window appears.
+    "handsfree": False,
 }
 
 

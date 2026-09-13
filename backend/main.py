@@ -474,6 +474,35 @@ async def event_stream():
     )
 
 
+class GlowWord(BaseModel):
+    word: str = Field(max_length=24)
+
+
+@app.post("/api/glow")
+async def glow(state: GlowWord):
+    """Put one word on the screen-edge caption, from anywhere."""
+    events.publish({"type": "glow", "word": state.word})
+    return {"ok": True}
+
+
+class VoiceTurn(BaseModel):
+    role: str = Field(pattern="^(user|assistant)$")
+    text: str = Field(max_length=20_000)
+
+
+@app.post("/api/voice-turn")
+async def voice_turn(turn: VoiceTurn):
+    """
+    A turn that happened by voice, with no window open.
+
+    Relayed to any page that IS open so the transcript stays in one place.
+    Sid has two doors - the app and the hotkey - and they should never look
+    like two different assistants.
+    """
+    events.publish({"type": "voice_turn", "role": turn.role, "text": turn.text})
+    return {"ok": True}
+
+
 @app.post("/api/wake")
 async def wake():
     """

@@ -712,6 +712,16 @@ function connectEvents() {
     if (event.type === "notification") {
       showNotification(event);
     }
+
+    // A turn that happened by VOICE while this window was open. It goes
+    // into the transcript like anything else, because it IS the same
+    // conversation - the hotkey and the app are two doors into one Sid,
+    // not two assistants.
+    if (event.type === "voice_turn" && event.text) {
+      messages.push({ role: event.role, content: event.text });
+      save();
+      render();
+    }
   };
 
   // Errors are normal here - a server restart closes every stream. Say
@@ -1157,6 +1167,7 @@ pollTasks();
 els.activity.addEventListener("click", async () => {
   els.actBox.hidden = false;
   const s = await (await fetch("/api/settings")).json();
+  document.getElementById("voice-mode-toggle").checked = !!s.handsfree;
   document.getElementById("dry-run-toggle").checked = !!s.dry_run;
   document.getElementById("confirm-act-toggle").checked = !!s.confirm_act;
   refreshPushUI();          // defined in the Phase 10 section below
@@ -1169,6 +1180,16 @@ document.getElementById("activity-close")
   .addEventListener("click", () => { els.actBox.hidden = true; });
 els.actBox.addEventListener("click", (e) => {
   if (e.target === els.actBox) els.actBox.hidden = true;
+});
+
+// Hands-free is a CHOICE, not a boolean buried in a file: "Hey Sid" either
+// opens the app or answers with just the glow. Both run the same turn.
+document.getElementById("voice-mode-toggle").addEventListener("change", (e) => {
+  fetch("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "handsfree", value: e.target.checked }),
+  });
 });
 
 for (const [id, key] of [["dry-run-toggle", "dry_run"],

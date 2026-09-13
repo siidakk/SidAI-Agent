@@ -714,7 +714,20 @@ def watch_events(glow: Glow) -> None:
                         continue
 
                     kind = event.get("type")
-                    if kind == "wake":
+                    if kind == "glow":
+                        # Another process (the wake-word listener) driving
+                        # the caption, so both doors into Sid look the same.
+                        word = event.get("word", "")
+                        glow.events.put(("wake", None))
+                        glow.events.put(("word", word))
+                        glow.events.put((
+                            "state",
+                            {"listening": "listening", "thinking": "thinking",
+                             "working": "thinking", "speaking": "speaking"}
+                            .get(word, "error")))
+                        if word in ("done", "nothing", "failed", ""):
+                            glow.events.put(("dismiss", None))
+                    elif kind == "wake":
                         glow.events.put(("wake", None))
                     elif kind == "state":
                         value = event.get("value", "idle")

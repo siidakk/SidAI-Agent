@@ -52,6 +52,7 @@ Set AXON_WAKE_ENGINE in .env to pick.
 
 import argparse
 import os
+import json
 import queue
 import struct
 import sys
@@ -348,7 +349,25 @@ def on_wake(debug: bool = False) -> None:
         focus_existing_window()
         return
 
-    # 3. Nothing open, so make one - and only now do we navigate.
+    # 3. Nothing open. What happens now depends on how you like to work.
+    #
+    #    "app"     - open the window, as it always did. You get the full
+    #                interface: transcript, activity, schedules.
+    #    "overlay" - don't open anything. Run the same spoken turn the
+    #                push-to-talk key runs, with just the glow.
+    #
+    #    Both do identical WORK - same server, same 50 tools, same
+    #    conversation. The only difference is whether a window appears.
+    # A BOOLEAN, because the control is a checkbox. The first version used
+    # a string ("app" / "overlay") and /api/settings only accepts bools, so
+    # setting it from the UI failed with a 422. Match the shape of the
+    # control to the shape of the setting.
+    if settings.get("handsfree", False):
+        if debug:
+            print("  overlay mode - handling it without a window", flush=True)
+        _wake_headless(debug)
+        return
+
     if debug:
         print("  no window open, starting one", flush=True)
     global _opened_at
@@ -356,6 +375,37 @@ def on_wake(debug: bool = False) -> None:
 
     _opened_at = time.time()          # see sid_window_is_open
     open_app_window(f"http://127.0.0.1:{config.PORT}/?listen=1")
+
+
+def _wake_headless(debug: bool = False) -> None:
+    """
+    Handle the wake word without opening anything.
+
+    The wake word already told us you want to talk, so there is nothing to
+    hold down - this listens until you stop, the way the app does.
+    """
+    try:
+        import voice_session
+    except Exception as exc:
+        _log(f"voice unavailable: {exc}")
+        return
+
+    def state(word):
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                f"http://127.0.0.1:{config.PORT}/api/glow",
+                data=json.dumps({"word": word}).encode(),
+                headers={"Content-Type": "application/json"}), timeout=4).close()
+        except Exception:
+            pass
+
+    try:
+        result = voice_session.run_turn(on_state=state)
+        _log(f"headless turn: {result.get('heard', result.get('why',''))[:70]}")
+        if debug:
+            print(f"  {result}", flush=True)
+    except Exception as exc:
+        _log(f"headless turn failed: {exc}")
 
 
 def ensure_server_running(debug: bool = False) -> bool:
