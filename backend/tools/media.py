@@ -94,7 +94,7 @@ def _endpoint_volume():
         return None
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 def set_volume(level: int) -> str:
     """Set the computer's speaker volume to an exact percentage.
 
@@ -155,7 +155,7 @@ def get_volume() -> str:
     return f"Volume is {level}%" + (" (muted)." if muted else ".")
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 def control_media(action: str) -> str:
     """Control whatever is currently playing - YouTube, Spotify, VLC, anything.
 

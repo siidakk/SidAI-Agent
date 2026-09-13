@@ -20,7 +20,7 @@ from datetime import datetime
 from . import tool
 
 
-@tool(tier="read")
+@tool(tier="read", speaks_for_itself=True)
 def get_time() -> str:
     """Get the current date and time on the user's computer.
 

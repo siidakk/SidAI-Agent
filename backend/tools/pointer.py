@@ -118,7 +118,7 @@ async def _announce_done() -> None:
         pass
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 async def click_at(x: int, y: int, button: str = "left", clicks: int = 1) -> str:
     """Click somewhere on screen. Get x and y from find_on_screen first.
 
@@ -158,7 +158,7 @@ async def click_at(x: int, y: int, button: str = "left", clicks: int = 1) -> str
     return f"{label} {button} at ({x}, {y})."
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 async def move_mouse(x: int, y: int) -> str:
     """Move the mouse pointer without clicking.
 
@@ -175,7 +175,7 @@ async def move_mouse(x: int, y: int) -> str:
     return f"Pointer moved to ({x}, {y})."
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 async def scroll_at(x: int, y: int, amount: int = -3) -> str:
     """Scroll the window under a given position.
 
@@ -197,7 +197,7 @@ async def scroll_at(x: int, y: int, amount: int = -3) -> str:
     return f"Scrolled {'up' if amount > 0 else 'down'} at ({x}, {y})."
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 async def drag_to(from_x: int, from_y: int, to_x: int, to_y: int) -> str:
     """Drag from one point to another — to move a slider, or a clip on a timeline.
 
@@ -222,7 +222,7 @@ async def drag_to(from_x: int, from_y: int, to_x: int, to_y: int) -> str:
     return f"Dragged from ({from_x}, {from_y}) to ({to_x}, {to_y})."
 
 
-@tool(tier="read")
+@tool(tier="read", speaks_for_itself=True)
 async def point_at(x: int, y: int, label: str = "") -> str:
     """Show the user where something is by moving Sid's ring over it.
 
@@ -244,8 +244,85 @@ async def point_at(x: int, y: int, label: str = "") -> str:
             + " The ring is there now; tell the user what to do next.")
 
 
-@tool(tier="read")
+@tool(tier="read", speaks_for_itself=True)
 async def stop_pointing() -> str:
     """Send Sid's ring back to the top of the screen."""
     await _announce_done()
     return "Ring back home."
+
+
+# ==========================================================================
+#  Find and click in ONE call
+# ==========================================================================
+#
+# THE SPEED PROBLEM THIS FIXES.
+#
+# Clicking used to take two whole turns:
+#
+#   turn 1   plan -> find_on_screen -> read "x=478, y=487" -> write an answer
+#   turn 2   plan -> click_at(478, 487)            -> write an answer
+#
+# Four model calls for one click, and measured at 6-12 seconds. The user's
+# description was exact: "it tells me coordinates then clicks on screen".
+#
+# The coordinates were never for the user. They were an intermediate value
+# that had to travel out to the model and back purely because the two halves
+# lived in different tools. Putting them in one tool keeps the number inside
+# the machine where it belongs.
+#
+# `find_on_screen` and `click_at` both stay: there are real cases for
+# looking without clicking, and for clicking a place you already know.
+
+@tool(tier="act", speaks_for_itself=True)
+async def click_on(target: str, clicks: int = 1) -> str:
+    """Find something on screen and click it, in one step.
+
+    PREFER THIS over find_on_screen followed by click_at - it is one call
+    instead of two and roughly twice as fast.
+
+    Args:
+        target: What to click, in plain words, e.g. "the Search button",
+                "the address bar", "the red X at the top right"
+        clicks: 1 for a normal click, 2 to double-click
+    """
+    from .vision import locate
+
+    where = await locate(target)
+    if where.get("error"):
+        return where["error"]
+    if not where.get("found"):
+        return (f"Couldn't find '{target}' on screen. "
+                f"{where.get('why', '')}").strip()
+
+    x, y = where["x"], where["y"]
+    result = await click_at(x, y, clicks=clicks)
+    return f"{result} ({where.get('what', target)})"
+
+
+@tool(tier="act", speaks_for_itself=True)
+async def type_into(target: str, text: str) -> str:
+    """Click a text box and type into it, in one step.
+
+    Use for search boxes and form fields: this finds the box, clicks it and
+    types, instead of three separate calls.
+
+    NEVER use this for passwords.
+
+    Args:
+        target: Which box, e.g. "the search field", "the To line"
+        text: What to type
+    """
+    from .vision import locate
+    from .computer import type_text
+
+    where = await locate(target)
+    if where.get("error"):
+        return where["error"]
+    if not where.get("found"):
+        return (f"Couldn't find '{target}' on screen. "
+                f"{where.get('why', '')}").strip()
+
+    await click_at(where["x"], where["y"])
+    await asyncio.sleep(0.25)
+    typed = type_text(text)
+    return f"Typed into {where.get('what', target)}. {typed}"

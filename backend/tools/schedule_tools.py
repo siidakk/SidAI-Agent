@@ -105,7 +105,7 @@ def _parse_when(text: str) -> tuple[str, str] | None:
     return None
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 async def schedule_task(name: str, when: str, prompt: str) -> str:
     """Set something to run automatically later, or on a repeating schedule.
 
@@ -161,7 +161,7 @@ async def list_schedules() -> str:
     return "\n".join(lines)
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 async def cancel_schedule(schedule_id: str) -> str:
     """Delete a scheduled task, by its id or its name.
 

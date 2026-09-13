@@ -49,6 +49,14 @@ class Tool:
     parameters: dict          # JSON Schema for the arguments
     tier: str                 # "read" | "act" | "danger"
 
+    # Does this tool's output already read as a finished answer?
+    #
+    # If so, a one-step plan can skip the second model call that normally
+    # rewrites tool output into English - worth ~2 seconds on the commonest
+    # kind of turn. Set it only where the tool returns a whole sentence a
+    # person would be happy to read, never where it returns raw data.
+    speaks_for_itself: bool = False
+
     @property
     def is_async(self) -> bool:
         return inspect.iscoroutinefunction(self.fn)
@@ -87,7 +95,7 @@ def _parse_docstring(doc: str) -> tuple[str, dict[str, str]]:
     return description, params
 
 
-def tool(tier: str = "read") -> Callable:
+def tool(tier: str = "read", speaks_for_itself: bool = False) -> Callable:
     """
     Decorator that registers a function as a tool.
 
@@ -140,6 +148,7 @@ def tool(tier: str = "read") -> Callable:
                 "required": required,
             },
             tier=tier,
+            speaks_for_itself=speaks_for_itself,
         )
         return fn
 

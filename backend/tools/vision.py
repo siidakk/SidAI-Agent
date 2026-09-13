@@ -126,16 +126,14 @@ async def see_screen(question: str = "") -> str:
 
 
 @tool(tier="read")
-async def find_on_screen(target: str) -> str:
-    """Find where something is on screen and return its coordinates.
+async def locate(target: str) -> dict:
+    """
+    Where is this thing? Returns a dict, not a sentence.
 
-    Use this before click_at, to get the x and y of a button, field, menu
-    item or icon. Describe the thing in plain words, as a person would
-    point at it.
-
-    Args:
-        target: What to find, e.g. "the Search button", "the address bar",
-                "the red X in the top right of the Spotify window"
+    Split out so that `find_on_screen` (which answers a person) and
+    `click_on` (which feeds a mouse) share ONE implementation. The
+    coordinate conversion is fiddly enough that two copies would certainly
+    drift apart.
     """
     prompt = (
         "You are looking at a screenshot of a Windows desktop.\n"
@@ -149,21 +147,21 @@ async def find_on_screen(target: str) -> str:
     try:
         answer, _scale, w, h = await _ask_about_screen(prompt)
     except Exception as exc:
-        return f"Could not look at the screen: {type(exc).__name__}: {str(exc)[:200]}"
+        return {"error": f"Could not look at the screen: "
+                         f"{type(exc).__name__}: {str(exc)[:180]}"}
 
     # Models wrap JSON in fences despite being told not to. Go and find it
     # rather than failing on punctuation - same lesson as planner.py.
     match = re.search(r"\{.*\}", answer, re.S)
     if not match:
-        return f"Could not read a position out of: {answer[:160]}"
+        return {"error": f"Could not read a position out of: {answer[:150]}"}
     try:
         found = json.loads(match.group(0))
     except json.JSONDecodeError:
-        return f"Could not read a position out of: {answer[:160]}"
+        return {"error": f"Could not read a position out of: {answer[:150]}"}
 
     if not found.get("found"):
-        return (f"'{target}' is not visible on screen. "
-                f"{found.get('why', '')}".strip())
+        return {"found": False, "why": str(found.get("why", ""))[:120]}
 
     try:
         # THE ONE CONVERSION. 0-1000 normalised -> real pixels. If a screen
@@ -171,10 +169,30 @@ async def find_on_screen(target: str) -> str:
         x = int(round(float(found["x"]) / 1000.0 * w))
         y = int(round(float(found["y"]) / 1000.0 * h))
     except (KeyError, TypeError, ValueError):
-        return f"The model gave an unusable position: {match.group(0)[:120]}"
+        return {"error": f"Unusable position: {match.group(0)[:110]}"}
 
-    x = max(0, min(w - 1, x))
-    y = max(0, min(h - 1, y))
-    what = str(found.get("what", target))[:80]
-    return (f"Found '{what}' at x={x}, y={y} (screen is {w}x{h}). "
-            f"Use click_at with exactly these numbers.")
+    return {"found": True,
+            "x": max(0, min(w - 1, x)),
+            "y": max(0, min(h - 1, y)),
+            "what": str(found.get("what", target))[:80],
+            "w": w, "h": h}
+
+
+async def find_on_screen(target: str) -> str:
+    """Find where something is on screen and return its coordinates.
+
+    Only use this when you need the position WITHOUT clicking. To click
+    something, call click_on instead — it is one call rather than two.
+
+    Args:
+        target: What to find, e.g. "the Search button", "the address bar",
+                "the red X in the top right of the Spotify window"
+    """
+    where = await locate(target)
+    if where.get("error"):
+        return where["error"]
+    if not where.get("found"):
+        return (f"'{target}' is not visible on screen. "
+                f"{where.get('why', '')}").strip()
+    return (f"Found '{where['what']}' at x={where['x']}, y={where['y']} "
+            f"(screen is {where['w']}x{where['h']}).")

@@ -248,7 +248,7 @@ async def search_web(query: str) -> str:
     return "\n".join(out)
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 async def play_on_youtube(query: str) -> str:
     """Find and play any song, music video or video on YouTube.
 
@@ -302,7 +302,7 @@ async def play_on_youtube(query: str) -> str:
     return f"Playing '{title}' on YouTube in a {where}. ({url})"
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 def open_url(url: str) -> str:
     """Open a web page in the user's default browser.
 
@@ -319,7 +319,7 @@ def open_url(url: str) -> str:
     return f"Opened {url} in a {where}."
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 def stop_music() -> str:
     """Stop whatever Sid is playing and close the player window.
 

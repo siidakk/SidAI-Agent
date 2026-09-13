@@ -131,7 +131,7 @@ def run_command(command: str) -> str:
     return output
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 def open_app(name: str) -> str:
     """Open an application, folder, file or website on the user's PC.
 
@@ -225,7 +225,7 @@ def list_windows() -> str:
     return "\n".join(out)
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 def focus_window(title: str) -> str:
     """Bring a window to the front of the screen.
 
@@ -259,7 +259,7 @@ if ($p) {{
     return f"Brought '{found}' to the front."
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 def type_text(text: str) -> str:
     """Type text into whatever window is currently focused, as if on the keyboard.
 
@@ -305,7 +305,7 @@ KEYS = {
 KEYEVENTF_KEYUP = 0x0002
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 def press_keys(keys: str) -> str:
     """Press a keyboard shortcut in the focused window.
 
@@ -360,7 +360,7 @@ def read_clipboard() -> str:
     return f"Clipboard:\n{text[:3000]}"
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 def write_clipboard(text: str) -> str:
     """Put text on the user's clipboard so they can paste it anywhere.
 
@@ -379,7 +379,7 @@ def write_clipboard(text: str) -> str:
     return f"Copied {len(text)} characters to the clipboard."
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 def lock_screen() -> str:
     """Lock the computer straight away. The user will need to sign in again.
 
@@ -400,7 +400,7 @@ def lock_screen() -> str:
     return "Locked."
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 def close_app(name: str) -> str:
     """Close an application gracefully, as if you clicked its X button.
 

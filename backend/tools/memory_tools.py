@@ -20,7 +20,7 @@ from .. import memory
 from . import tool
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 async def remember(fact: str, kind: str = "note") -> str:
     """Save something about the user so you still know it in future conversations.
 
@@ -101,7 +101,7 @@ async def list_memories() -> str:
     return "\n".join(lines)
 
 
-@tool(tier="act")
+@tool(tier="act", speaks_for_itself=True)
 async def forget(fact_id: int) -> str:
     """Delete one remembered fact. Get its id from list_memories or recall first.
 

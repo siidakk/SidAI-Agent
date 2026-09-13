@@ -398,6 +398,34 @@ async def stream_reply(
             yield event
 
     # ---- 6. turn the results into an actual answer ----------------------
+    #
+    # ...unless there is nothing to turn. THE SECOND MODEL CALL IS THE
+    # SINGLE BIGGEST COST IN A TURN.
+    #
+    # Measured over 60 real turns: tools took 828ms, everything else took
+    # 3243ms. A planned turn ran 5.8s against 1.9s for a direct answer, and
+    # almost the whole gap is this extra round trip.
+    #
+    # For a one-step plan whose tool already returns a finished sentence -
+    # "Clicked left at (478, 487)", "Playing 'Shape of You'" - that call
+    # spends two seconds rephrasing a sentence that was already fine.
+    #
+    # So: one step, it worked, and the tool is one whose output IS the
+    # answer -> say it and stop. Anything with several steps, a failure, or
+    # a tool that returns raw data still gets written up properly, because
+    # there the writing is the valuable part.
+    if len(steps) == 1 and not failures:
+        only = steps[0]
+        spec = tools.REGISTRY.get(only["tool"])
+        if spec is not None and getattr(spec, "speaks_for_itself", False):
+            answer = results.get(only["id"], "").strip()
+            if answer and len(answer) <= 400:
+                yield {"type": "text", "text": answer}
+                yield {"type": "done",
+                       "usage": {"input_tokens": 0, "output_tokens": 0},
+                       "mode": "planned", "steps": 1, "shortcut": True}
+                return
+
     # The plan produced raw tool output. Someone still has to read it and
     # reply in English, so this is the second (and final) model call.
     transcript = "\n\n".join(
