@@ -29,7 +29,7 @@
 // changes, a brand-new cache is created and the old one gets deleted in the
 // "activate" step below. This is how you avoid the classic PWA bug where
 // users are stuck on a stale version forever.
-const CACHE = "sid-v13";  // bumped: hands-free mode + live voice turns
+const CACHE = "sid-v14";  // bumped: hands-free governs both doors
 
 // The minimum set of files needed to show the interface.
 const SHELL = [

@@ -68,7 +68,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from backend import config  # noqa: E402
+from backend import config, settings  # noqa: E402
 
 # How far the glow reaches in from each edge.
 GLOW = 210
@@ -783,6 +783,43 @@ def _held() -> bool:
     return bool(user32.GetAsyncKeyState(PTT_VK) & 0x8000)
 
 
+def handsfree() -> bool:
+    """
+    Should voice answer with just the glow, or open the app?
+
+    Read fresh on every press, never cached. It is one small file read, and
+    a toggle that needs a restart to take effect is a toggle people stop
+    trusting.
+    """
+    try:
+        return bool(settings.get("handsfree", False))
+    except Exception:
+        return False
+
+
+def _open_the_app() -> None:
+    """Open Sid's window, ready to listen - the same thing "Hey Sid" does."""
+    start_server_if_needed()
+    if window_is_open():
+        post("/api/wake")                 # already there: just start listening
+        focus_window()
+        return
+    from backend.tools.web import open_app_window
+    open_app_window(f"http://127.0.0.1:{config.PORT}/?listen=1")
+
+
+def window_is_open() -> bool:
+    from backend import windows
+    return windows.window_exists("Sid", exact=True)
+
+
+def focus_window() -> None:
+    from backend import windows
+    for hwnd in windows.find_windows("Sid", exact=True):
+        windows.focus_window_handle(hwnd)
+        return
+
+
 def _do_turn(glow) -> None:
     """
     A whole spoken exchange, driven by the key being held.
@@ -923,9 +960,12 @@ def main() -> None:
         # The old chord still works, for anyone who prefers a toggle.
         while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
             if msg.message == 0x0312 and not _turn_running.is_set():
-                glow.wake()
-                threading.Thread(target=_run_turn_guarded,
-                                 args=(glow,), daemon=True).start()
+                if handsfree():
+                    glow.wake()
+                    threading.Thread(target=_run_turn_guarded,
+                                     args=(glow,), daemon=True).start()
+                else:
+                    threading.Thread(target=_open_the_app, daemon=True).start()
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
 
@@ -934,10 +974,20 @@ def main() -> None:
         # ends the recording.
         down = _held()
         if down and not was_down and not _turn_running.is_set():
-            glow.wake()
-            glow.say("listening")
-            threading.Thread(target=_run_turn_guarded,
-                             args=(glow,), daemon=True).start()
+            # ONE SETTING, BOTH DOORS.
+            #
+            # "hands-free" governed only the wake word, so turning it off
+            # stopped "Hey Sid" opening a window but left the key glowing
+            # away regardless - a switch that controls half of the thing it
+            # is named after. If it says hands-free mode, it has to mean it
+            # for every way in.
+            if handsfree():
+                glow.wake()
+                glow.say("listening")
+                threading.Thread(target=_run_turn_guarded,
+                                 args=(glow,), daemon=True).start()
+            else:
+                threading.Thread(target=_open_the_app, daemon=True).start()
         was_down = down
 
         glow.step()
