@@ -1167,6 +1167,7 @@ pollTasks();
 els.activity.addEventListener("click", async () => {
   els.actBox.hidden = false;
   const s = await (await fetch("/api/settings")).json();
+  document.getElementById("ptt-toggle").checked = s.ptt_enabled !== false;
   document.getElementById("voice-mode-toggle").checked = !!s.handsfree;
   document.getElementById("dry-run-toggle").checked = !!s.dry_run;
   document.getElementById("confirm-act-toggle").checked = !!s.confirm_act;
@@ -1193,7 +1194,8 @@ document.getElementById("voice-mode-toggle").addEventListener("change", (e) => {
 });
 
 for (const [id, key] of [["dry-run-toggle", "dry_run"],
-                         ["confirm-act-toggle", "confirm_act"]]) {
+                         ["confirm-act-toggle", "confirm_act"],
+                         ["ptt-toggle", "ptt_enabled"]]) {
   document.getElementById(id).addEventListener("change", (e) => {
     fetch("/api/settings", {
       method: "POST",

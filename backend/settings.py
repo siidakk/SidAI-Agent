@@ -55,6 +55,15 @@ DEFAULTS = {
     # the voice path was moved onto the app's own conversation, the same
     # memory too. The only difference is whether a window appears.
     "handsfree": False,
+
+    # The keyboard shortcut. Hold Right Ctrl to talk (configurable with
+    # AXON_PTT_KEY in .env).
+    #
+    # Its own switch, separate from the wake word, because they fail in
+    # opposite directions: a wake word goes off when you did not want it,
+    # a held key never does. Turning one off should not silently take the
+    # other with it - so each gets a control, and each says which it is.
+    "ptt_enabled": True,
 }
 
 

@@ -797,6 +797,14 @@ def handsfree() -> bool:
         return False
 
 
+def ptt_on() -> bool:
+    """Is the keyboard shortcut switched on at all?"""
+    try:
+        return bool(settings.get("ptt_enabled", True))
+    except Exception:
+        return True
+
+
 def _open_the_app() -> None:
     """Open Sid's window, ready to listen - the same thing "Hey Sid" does."""
     start_server_if_needed()
@@ -959,7 +967,7 @@ def main() -> None:
     while True:
         # The old chord still works, for anyone who prefers a toggle.
         while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
-            if msg.message == 0x0312 and not _turn_running.is_set():
+            if msg.message == 0x0312 and not _turn_running.is_set() and ptt_on():
                 if handsfree():
                     glow.wake()
                     threading.Thread(target=_run_turn_guarded,
@@ -973,7 +981,7 @@ def main() -> None:
         # reports the press, and this needs the release too - that is what
         # ends the recording.
         down = _held()
-        if down and not was_down and not _turn_running.is_set():
+        if down and not was_down and not _turn_running.is_set() and ptt_on():
             # ONE SETTING, BOTH DOORS.
             #
             # "hands-free" governed only the wake word, so turning it off

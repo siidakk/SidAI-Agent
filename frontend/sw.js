@@ -29,7 +29,7 @@
 // changes, a brand-new cache is created and the old one gets deleted in the
 // "activate" step below. This is how you avoid the classic PWA bug where
 // users are stuck on a stale version forever.
-const CACHE = "sid-v14";  // bumped: hands-free governs both doors
+const CACHE = "sid-v15";  // bumped: key shortcut toggle
 
 // The minimum set of files needed to show the interface.
 const SHELL = [
