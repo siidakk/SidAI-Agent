@@ -24,7 +24,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import (approvals, audit, auth, config, events, jobs, llm, memory,
-               notify, push, settings, tools, traces, triggers, tunnel)
+               notify, phone, push, settings, tools, traces, triggers,
+               tunnel)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI):
     triggers.init()
     push.init()
     traces.init()
+    phone.init()
 
     # Start the scheduler. This is what lets Sid act without being
     # asked - see triggers.py.
@@ -472,6 +474,56 @@ async def event_stream():
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ==========================================================================
+#  THE PHONE BRIDGE
+# ==========================================================================
+# Two endpoints, both called by an iOS Shortcut rather than a browser.
+#
+# They are deliberately dull: one returns a flat JSON object with no
+# nesting, the other takes two fields. Every layer of structure here is a
+# "Get Dictionary Value" block someone has to add by hand in the Shortcuts
+# app, so the shape of this response IS the difficulty of the setup.
+
+@app.get("/api/phone/next")
+async def phone_next():
+    """
+    The phone asking: anything for me?
+
+    Returns a FLAT object - {"id": ..., "action": ..., "to": ..., "body": ...}
+    - so the Shortcut can read each field with one block. Returns
+    {"action": "none"} rather than 404 when there is nothing, because an
+    error status is far more awkward to handle over there than a value is.
+    """
+    command = phone.take_next()
+    if command is None:
+        return {"action": "none"}
+    return command
+
+
+class PhoneResult(BaseModel):
+    id: str = Field(max_length=32)
+    result: str = Field(default="", max_length=2000)
+
+
+@app.post("/api/phone/done")
+async def phone_done(report: PhoneResult):
+    """The phone reporting back what it did."""
+    ok = phone.complete(report.id, report.result)
+    if ok:
+        events.publish({"type": "phone_result", "id": report.id,
+                        "result": report.result[:200]})
+    return {"ok": ok}
+
+
+@app.get("/api/phone/status")
+async def phone_status():
+    """What's waiting, and when the phone last checked in."""
+    return {"pending": phone.pending(),
+            "recent": phone.recent(8),
+            "last_seen": phone.last_seen(),
+            "actions": phone.ACTIONS}
 
 
 class GlowWord(BaseModel):

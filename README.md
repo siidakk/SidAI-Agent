@@ -46,7 +46,7 @@ slow, close the laptop, and check the answer on your phone later.
 |---|---|
 | **Runs on** | One Windows laptop, 8 GB RAM |
 | **Costs** | Nothing — free API tier, or fully offline via Ollama |
-| **Tools** | 50 · 20 read, 26 act, 4 requiring your approval |
+| **Tools** | 61 · 22 read, 35 act, 4 requiring your approval |
 | **Interface** | Vanilla HTML/CSS/JS — no framework, no build step |
 | **Storage** | 6 SQLite files in one folder. Nothing in the cloud. |
 | **Brains** | Gemini · Ollama (offline) · Claude — swap with a dropdown |
@@ -326,6 +326,10 @@ py check.py --tools
 | `click_at` / `move_mouse` | act | clicks anything, anywhere — cursor glides so you can see it |
 | `scroll_at` / `drag_to` | act | scroll a window, drag a slider or a timeline clip |
 | `point_at` | read | "where's the settings button?" — the ring moves there |
+| `phone_message` | act | "text Mom I'm running late" — queued for your iPhone |
+| `phone_play` / `phone_open` | act | "play tum hi ho on my phone", "open Maps on my phone" |
+| `phone_timer` / `phone_note` | act | "10 minute timer on my phone", "note: buy milk" |
+| `phone_status` | read | "did that reach my phone?" |
 | `list_schedules` / `cancel_schedule` | read/act | "what's automatic?", "cancel Morning ping" |
 
 Adding a tool is one function with a docstring — see `NOTES/phase-2.md` §4.
