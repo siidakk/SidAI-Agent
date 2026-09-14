@@ -16,14 +16,27 @@ HI_WORDS = re.compile(r"\b(hai|hain|kya|nahi|aap|mujhe|karo|raha|rahi|ka|ki|ke|"
                       r"mein|aur|bata|kar|se|ko|yeh|woh|hoga|gaya)\b", re.I)
 
 def guess(text):
+    """
+    Which language is this - or is the question meaningless here?
+
+    A reply that is mostly a tool result (a date, a temperature, a path)
+    has no language at all, and scoring it as English made this suite
+    report failures that were not failures. "neutral" is a real third
+    answer, and those cases are skipped rather than failed.
+    """
+    # An EMPTY answer is not neutral, it is a failure to answer, and
+    # letting "neutral" swallow it would hide exactly the kind of breakage
+    # this suite exists to catch. Skipping is only for a real reply that
+    # happens to carry no language ("Paris", "26 C", a file path).
+    if not text.strip(): return "empty"
     if DEV.search(text): return "hi"
     words = re.findall(r"[A-Za-z']+", text)
-    if not words: return "?"
+    if len(words) < 6: return "neutral"
     hits = len(HI_WORDS.findall(text))
     return "hi" if hits >= 3 or hits / max(len(words), 1) > 0.18 else "en"
 
 async def main():
-    ok = 0
+    ok = total = 0
     for name, ask, want in CASES:
         out = ""
         async for ev in llm.stream_reply([{"role": "user", "content": ask}]):
@@ -32,9 +45,15 @@ async def main():
             elif isinstance(ev, str):
                 out += ev
         got = guess(out)
-        mark = "pass" if got == want else "FAIL"
-        ok += got == want
+        if got == "neutral":
+            mark, scored = "skip", False
+        elif got == "empty":
+            mark, scored = "FAIL", True
+        else:
+            mark, scored = ("pass" if got == want else "FAIL"), True
+        ok += (got == want)
+        total += scored
         print(f"  {mark}  {name:26} want {want}  got {got}   {out[:70]!r}")
-    print(f"\n{ok}/{len(CASES)} correct")
+    print(f"\n{ok}/{total} correct ({len(CASES) - total} skipped as neutral)")
 
 asyncio.run(main())

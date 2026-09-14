@@ -144,6 +144,20 @@
       ],
       "max_steps": 2,
       "_why": "Media keys only reach the focused window; closing the player always works."
+    },
+    {
+      "name": "search survives the quota running out",
+      "ask": "Search the web for who won the 2024 T20 cricket world cup.",
+      "tools": [
+        "search_web"
+      ],
+      "max_steps": 4,
+      "not_contains": [
+        "out of free quota",
+        "no results",
+        "quota"
+      ],
+      "_why": "Search was one call to Gemini grounding, whose free tier runs out in an afternoon. When it did, Sid could not look anything up at all. There is now a ladder of four backends; this case fails if the ladder ever collapses back to depending on the scarce one."
     }
   ]
 }

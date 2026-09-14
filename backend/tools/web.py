@@ -169,83 +169,20 @@ async def search_web(query: str) -> str:
     Args:
         query: What to search for, e.g. "python asyncio tutorial"
     """
-    # WHY THIS ISN'T SCRAPING ANY MORE
+    # WHY THIS FUNCTION IS NOW FOUR LINES
     #
-    # This used to scrape DuckDuckGo's HTML. That worked for about a week.
-    # DuckDuckGo now returns HTTP 202 and a bot-detection page for both
-    # html.duckduckgo.com and lite.duckduckgo.com - so the tool started
-    # reporting "no results" for every single query, which is the worst kind
-    # of failure: confidently wrong rather than obviously broken.
+    # It used to be one call to Gemini's grounded search, and it had one
+    # failure mode that mattered: a free-tier limit small enough to hit in
+    # an afternoon. When it ran out, Sid could not look anything up at all.
     #
-    # Scraping someone's search page was always borrowed time. This instead
-    # asks Gemini to search Google and answer with sources ("grounding") -
-    # real results, an interface meant to be used, and it needs no extra key
-    # because you already have one.
-    #
-    # The catch, and it is a real one: grounding has its OWN free-tier quota,
-    # much smaller than the chat quota. When it runs out, say so plainly
-    # rather than pretending there were no results.
-    import json as _json
+    # One provider means one failure takes the whole capability with it. The
+    # fix lives in backend/search.py - a ladder of four independent
+    # backends with a cache in front, arranged so the scarce one is spent
+    # LAST rather than first. Read that file for why each rung is where it
+    # is and which candidates were dropped for failing a probe.
+    from .. import search as web_search
 
-    from .. import config
-
-    if not config.GEMINI_API_KEY:
-        return (
-            "Web search needs a Gemini API key (free, no card) in .env as "
-            "GEMINI_API_KEY. Get one at aistudio.google.com/apikey"
-        )
-
-    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-           f"{config.GEMINI_MODEL}:generateContent")
-    payload = {
-        "contents": [{"role": "user", "parts": [{"text": query}]}],
-        "tools": [{"google_search": {}}],
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                url, headers={"x-goog-api-key": config.GEMINI_API_KEY}, json=payload
-            )
-    except Exception as exc:
-        return f"Search failed: {exc}"
-
-    if response.status_code == 429:
-        return (
-            "Web search is out of free quota for now (grounded search has a "
-            "much smaller daily limit than chat). It resets in a few hours. "
-            "Tell the user you can't search right now - do NOT retry."
-        )
-    if response.status_code != 200:
-        try:
-            detail = response.json()["error"]["message"][:150]
-        except Exception:
-            detail = response.text[:150]
-        return f"Search failed ({response.status_code}): {detail}. Do not retry."
-
-    data = response.json()
-    try:
-        candidate = data["candidates"][0]
-    except (KeyError, IndexError):
-        return f"No answer for '{query}'."
-
-    text = "".join(
-        part.get("text", "") for part in candidate.get("content", {}).get("parts", [])
-    ).strip()
-
-    sources = []
-    for chunk in candidate.get("groundingMetadata", {}).get("groundingChunks", [])[:5]:
-        web = chunk.get("web", {})
-        if web.get("uri"):
-            sources.append(f"  - {web.get('title', 'source')}: {web['uri']}")
-
-    if not text:
-        return f"No answer for '{query}'."
-
-    out = [f"Search results for '{query}':", "", text[:2500]]
-    if sources:
-        out += ["", "Sources:"] + sources
-    return "\n".join(out)
+    return await web_search.search(query)
 
 
 @tool(tier="act", speaks_for_itself=True)

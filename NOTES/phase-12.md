@@ -557,6 +557,112 @@ of clever questions ever will.
 
 ---
 
+## 6h. When a quota runs out, switch - don't stop
+
+Two separate limits kept taking Sid down: grounded **search**, and the
+**chat model** itself. Both had the same shape, and the same bad answer to
+it - one provider, and when that provider said no, the capability was
+simply gone for the rest of the day.
+
+> **One provider means one refusal takes everything with it.** The fix is
+> never a better provider. It is more than one, in an order.
+
+### Probe before you build
+
+Every candidate was tested against real queries before a line was written
+around it, and two obvious-sounding ones were thrown out for failing:
+
+```
+duckduckgo html   6 results   1475ms     good, blocks you sometimes (202)
+bing rss          6 results    426ms     always answers, quality wobbles
+gemini grounding  none                   already out of quota
+real browser      4 results  11345ms     slow, and cannot be refused
+mojeek            captcha page
+searxng           public instances refuse JSON, or no longer resolve
+```
+
+> **A fallback you have not tested is not a fallback.** It is a second way
+> to fail, and you find out on the day the first one breaks.
+
+### The ordering is the design, and it is not best-first
+
+```
+0. cache          free, instant
+1. duckduckgo     free, unlimited
+2. bing rss       free, unlimited
+3. gemini         EXCELLENT, SCARCE      <- deliberately near the bottom
+4. real browser   free, unlimited, slow
+```
+
+Putting the best rung first would spend the scarce thing on every trivial
+lookup. Putting it fourth means the free rungs spend themselves instead, so
+the quota is still there on the day nothing else will do.
+
+The bottom rung is the interesting one: Sid already drives a real Chrome
+for Phase 8, and **a real browser loading a real search page cannot be
+rate limited**, because it is indistinguishable from you doing it. Eleven
+seconds - which is exactly why it is last rather than first.
+
+### The same idea, one layer down
+
+The chat model needed it too. 429 was being raised straight to the user
+mid-sentence, with nothing tried afterwards - while `gemini-3.5-flash`,
+which has its own separate limit, was answering fine the whole time.
+
+The important distinction is between two failures that look identical:
+
+```
+503 overloaded  ->  this model will work SHORTLY        ->  wait for it
+429 refused     ->  this model will NOT work shortly    ->  ask another one
+```
+
+They were being handled the same way. Waiting on a refusal is the slowest
+possible route to getting nowhere.
+
+### Write down the refusal
+
+Trying, failing, and moving on is better than giving up - but it pays for
+the failed attempt on *every single request*, forever. So `backend/quota.py`
+records that something refused and stops asking it until it has likely
+recovered:
+
+```
+1. nothing refusing   asked ['flash-lite']               ok
+2. flash-lite 429s    asked ['flash-lite', 'flash']      ok, switched
+3. asked again        asked ['flash']                    skipped the dead one
+4. both refuse        honest error naming both
+5. limits reset       asked ['flash-lite']               revived
+```
+
+Step 3 is the whole point: the wasted round trip happens once, not forever.
+
+It lives on disk, not in memory, because Sid is several processes - server,
+overlay, scheduled tasks - and a limit one of them hits is hit for all of
+them. In memory, each would rediscover the same refusal separately.
+
+And it is shared between search backends and chat models, which have
+nothing to do with each other but pose an identical problem: **a named
+thing, temporarily refusing, recovering on its own later.**
+
+### A rest is a guess, never a refusal of its own
+
+If every rung is resting, the code tries anyway rather than giving up. A
+cooldown is a prediction about when a limit resets, and being wrong about
+a prediction must never be the reason Sid does nothing.
+
+Same instinct as the tool descriptions in the phone bridge: when it
+genuinely cannot do the job, it says which rungs failed and forbids
+reporting an empty internet as fact.
+
+```
+Could not search just now. Tried: duckduckgo: resting; bing: resting;
+gemini: out of quota, resting; browser: RuntimeError. This is a search
+problem, not an empty internet - do not tell the user the thing does not
+exist, and do not retry.
+```
+
+---
+
 ## 6e. Matching Apple's glow, and the seam nobody would have found by eye
 
 "Make it exactly like Apple's" is not a taste request — it is a list of

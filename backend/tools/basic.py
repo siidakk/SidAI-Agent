@@ -132,3 +132,41 @@ def system_info() -> str:
         pass
 
     return "\n".join(lines)
+
+
+@tool(tier="read")
+async def quota_status() -> str:
+    """Check whether anything Sid depends on is rate limited right now.
+
+    Use when the user asks why search or answers are slow or failing, or
+    asks about limits and quotas.
+    """
+    # Sid switches away from a refusing backend on its own, so this is
+    # not needed to keep working - it is here so "why was that slow?" has
+    # an answer, instead of the user guessing.
+    from .. import quota, search
+
+    lines = []
+    resting = quota.status()
+    if resting:
+        lines.append("Currently rate limited (Sid is using alternatives):")
+        for r in resting:
+            left = r["seconds_left"]
+            when = f"{left // 60}m {left % 60}s" if left >= 60 else f"{left}s"
+            lines.append(f"  {r['name']} - retrying in {when}")
+    else:
+        lines.append("Nothing is rate limited. Everything is available.")
+
+    try:
+        search.init()
+        with search._connect() as conn:
+            row = conn.execute(
+                "SELECT backend, COUNT(*) n FROM cache "
+                "GROUP BY backend ORDER BY n DESC").fetchall()
+        if row:
+            lines.append("Cached searches by source: " +
+                         ", ".join(f"{r['backend']} {r['n']}" for r in row))
+    except Exception:
+        pass
+
+    return "\n".join(lines)

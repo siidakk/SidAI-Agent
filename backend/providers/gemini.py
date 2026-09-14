@@ -21,13 +21,42 @@ from typing import AsyncIterator
 
 import httpx
 
-from .. import config
+from .. import config, quota
 
 BASE = "https://generativelanguage.googleapis.com/v1beta"
 TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 
 # How many times to retry when Google says "busy". 3 tries = waits of 1s + 2s.
 MAX_ATTEMPTS = 3
+
+# THE MODEL LADDER
+#
+# Free-tier Gemini refuses with 429 far more often than people expect, and
+# it used to take Sid down with it: 429 was raised straight to the user as
+# "free-tier limit reached", mid-sentence, with nothing tried after it.
+#
+# These models have SEPARATE limits. So when one refuses, the honest move is
+# not to report failure, it is to ask the other one - which is what everyone
+# means by "a quota ran out, switch to the next".
+#
+# Probed rather than assumed. The 2.x models below are gone from the free
+# API entirely (404, "no longer available"), so listing them would have
+# bought a guaranteed-dead rung:
+#
+#     gemini-3.5-flash-lite   200
+#     gemini-3.5-flash        200
+#     gemini-2.5-flash        404
+#     gemini-2.0-flash        404
+FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.5-flash"]
+
+
+def _ladder() -> list[str]:
+    """Whatever .env asked for first, then the others, with no duplicates."""
+    out = [config.GEMINI_MODEL]
+    for name in FALLBACK_MODELS:
+        if name not in out:
+            out.append(name)
+    return out
 
 
 async def check() -> dict:
@@ -112,6 +141,17 @@ class _Overloaded(Exception):
     """Raised when Gemini is temporarily busy and the request is worth retrying."""
 
 
+class _Refused(Exception):
+    """
+    Raised on 429: this MODEL is rate limited right now.
+
+    Deliberately separate from _Overloaded, because the two want opposite
+    responses. Overloaded means "the same model will work shortly, wait".
+    Refused means "this model will not work shortly - ask a different one".
+    Waiting on a refusal is the slowest possible way to get nowhere.
+    """
+
+
 async def stream_reply(
     messages: list[dict],
     tools: list[dict] | None = None,
@@ -141,20 +181,43 @@ async def stream_reply(
             "https://aistudio.google.com/apikey and put it in .env"
         )
 
-    for attempt in range(MAX_ATTEMPTS):
-        try:
-            async for event in _attempt(messages, tools, system, temperature):
-                yield event
-            return                       # finished cleanly, stop retrying
+    # Ask whichever model is not currently known to be refusing. If they all
+    # are, take the first anyway: a rest is a guess about when a limit
+    # resets, and being wrong about it must never be why Sid does nothing.
+    ladder = _ladder()
+    start = quota.first_available(ladder) or ladder[0]
+    order = ladder[ladder.index(start):] + ladder[:ladder.index(start)]
 
-        except _Overloaded:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise RuntimeError(
-                    f"Gemini's servers stayed busy after {MAX_ATTEMPTS} tries. "
-                    "Wait a minute, or set GEMINI_MODEL=gemini-3.5-flash-lite "
-                    "in .env — the smaller models are usually less contended."
-                )
-            await asyncio.sleep(2 ** attempt)
+    refused = []
+
+    for model in order:
+        for attempt in range(MAX_ATTEMPTS):
+            try:
+                async for event in _attempt(messages, tools, system,
+                                            temperature, model=model):
+                    yield event
+                quota.revive(model)      # it worked - drop any old grudge
+                return                   # finished cleanly, stop retrying
+
+            except _Overloaded:
+                # "Busy" means THIS model will work shortly, so wait for it.
+                if attempt == MAX_ATTEMPTS - 1:
+                    break                # out of patience; try the next model
+                await asyncio.sleep(2 ** attempt)
+
+            except _Refused:
+                # "Rate limited" means this model will NOT work shortly.
+                # Waiting is the slowest possible way to get nowhere, so
+                # write it down and move straight to the next one.
+                quota.rest(model, reason="429 rate limited")
+                refused.append(model)
+                break
+
+    raise RuntimeError(
+        "Every Gemini model is rate limited right now (" +
+        ", ".join(refused or order) + "). Free-tier limits usually reset "
+        "within a minute or two - this is not a problem with your key."
+    )
 
 
 async def _attempt(
@@ -162,6 +225,7 @@ async def _attempt(
     tools: list[dict] | None = None,
     system: str | None = None,
     temperature: float | None = None,
+    model: str | None = None,
 ) -> AsyncIterator[dict]:
     """
     One single try. Reads Gemini's SSE stream and yields our own event dicts.
@@ -173,7 +237,8 @@ async def _attempt(
     # NOTE: the old ":streamGenerateContent" endpoint is retired. Streaming is
     # now plain ":generateContent" with alt=sse. If you find a tutorial using
     # streamGenerateContent, it's out of date — you'll get a 404.
-    url = f"{BASE}/models/{config.GEMINI_MODEL}:generateContent"
+    model = model or config.GEMINI_MODEL
+    url = f"{BASE}/models/{model}:generateContent"
     payload = {
         "contents": _to_gemini(messages),
         "systemInstruction": {"parts": [{"text": system or config.SYSTEM_PROMPT}]},
@@ -204,6 +269,8 @@ async def _attempt(
                 # don't bother" — a bad key won't fix itself on retry.
                 if resp.status_code in (500, 502, 503, 504):
                     raise _Overloaded()
+                if resp.status_code == 429:
+                    raise _Refused(model)
                 raise RuntimeError(_friendly(resp.status_code, body))
 
             usage = {"input_tokens": 0, "output_tokens": 0}
