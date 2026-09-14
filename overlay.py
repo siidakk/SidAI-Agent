@@ -70,8 +70,10 @@ sys.path.insert(0, str(ROOT))
 
 from backend import config, settings  # noqa: E402
 
-# How far the glow reaches in from each edge.
-GLOW = 210
+# How far the glow reaches in from each edge. This is the WINDOW depth -
+# the bloom has to fade to nothing before it, or the light gets cut off in
+# a straight line and the window edge becomes visible.
+GLOW = 104
 
 # Frames per second. 20 is plenty for something this soft - the eye reads
 # a slow colour drift, not motion.
@@ -138,7 +140,8 @@ PTT_VK = PTT_KEYS.get(PTT_NAME, 0xA3)
 # Apple-Intelligence-ish: warm pink through violet into blue and cyan.
 # Sid's own cyan is in there so the two still read as one product.
 PALETTES = {
-    "listening": [(255, 111, 216), (161, 107, 255), (59, 130, 246), (34, 211, 238)],
+    "listening": [(255, 111, 190), (255, 126, 138), (186, 112, 255),
+                  (86, 140, 255), (52, 206, 238)],
     "thinking":  [(161, 107, 255), (99, 102, 241), (59, 130, 246), (124, 134, 255)],
     "speaking":  [(34, 211, 238), (62, 216, 240), (99, 179, 237), (161, 107, 255)],
     "needs_you": [(255, 180, 84), (255, 140, 60), (255, 200, 120), (255, 160, 70)],
@@ -334,34 +337,35 @@ class GlowStrip:
         user32.SetWindowPos(self.hwnd, wt.HWND(HWND_TOPMOST), 0, 0, 0, 0,
                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
         self.visible = False
+        self._surface = None
 
     def show(self, on: bool) -> None:
         if on != self.visible:
             user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE if on else SW_HIDE)
             self.visible = on
 
-    def paint(self, rgba: np.ndarray) -> None:
+    def _ensure_surface(self):
         """
-        Push one RGBA frame to the screen.
+        Allocate the drawing surface once, not once per frame.
 
-        Windows wants BGRA with **premultiplied** alpha: each colour channel
-        already multiplied by its own alpha. Skip that and semi-transparent
-        pixels come out too bright, with a milky halo - the classic symptom.
+        THE SECOND HALF OF THE FRAME BUDGET. Creating a DC and a DIB
+        section every frame for every strip held the loop at ~10fps even
+        after the pixel maths came down to 24ms. Windows is doing real
+        allocation work each time, and none of it changes between frames.
+
+        Allocated once, the bits are wrapped in a numpy array and written
+        in place - so a frame costs one memcpy and one blit.
         """
-        h, w, _ = rgba.shape
-        alpha = rgba[:, :, 3:4].astype(np.uint16)
-        rgb = (rgba[:, :, :3].astype(np.uint16) * alpha // 255).astype(np.uint8)
-        # BGRA, and flipped because a DIB is bottom-up by convention.
-        bgra = np.dstack([rgb[:, :, 2], rgb[:, :, 1], rgb[:, :, 0],
-                          rgba[:, :, 3]])[::-1].copy()
+        if getattr(self, "_surface", None) is not None:
+            return self._surface
 
         screen_dc = user32.GetDC(None)
         mem_dc = gdi32.CreateCompatibleDC(screen_dc)
 
         info = BITMAPINFO()
         info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        info.bmiHeader.biWidth = w
-        info.bmiHeader.biHeight = h
+        info.bmiHeader.biWidth = self.w
+        info.bmiHeader.biHeight = self.h          # bottom-up, see paint()
         info.bmiHeader.biPlanes = 1
         info.bmiHeader.biBitCount = 32
         info.bmiHeader.biCompression = 0          # BI_RGB
@@ -369,10 +373,24 @@ class GlowStrip:
         bits = ctypes.c_void_p()
         bitmap = gdi32.CreateDIBSection(mem_dc, ctypes.byref(info), 0,
                                         ctypes.byref(bits), None, 0)
-        ctypes.memmove(bits, bgra.ctypes.data, bgra.nbytes)
-        old = gdi32.SelectObject(mem_dc, bitmap)
+        gdi32.SelectObject(mem_dc, bitmap)
 
-        size = wt.SIZE(w, h)
+        # A numpy view straight onto the bitmap's memory. Writing here IS
+        # writing what Windows will blit.
+        buffer = (ctypes.c_uint8 * (self.w * self.h * 4)).from_address(bits.value)
+        view = np.frombuffer(buffer, dtype=np.uint8).reshape(self.h, self.w, 4)
+
+        self._surface = (screen_dc, mem_dc, bitmap, view)
+        return self._surface
+
+    def paint(self, rgba: np.ndarray) -> None:
+        """Push one frame to the screen. Expects bottom-up premultiplied BGRA."""
+        screen_dc, mem_dc, _bitmap, view = self._ensure_surface()
+        # `rgba` already arrives as bottom-up premultiplied BGRA, so this is
+        # a straight copy into the bitmap Windows will blit.
+        view[:] = rgba
+
+        size = wt.SIZE(self.w, self.h)
         src = wt.POINT(0, 0)
         dst = wt.POINT(self.x, self.y)
         blend = BLENDFUNCTION(AC_SRC_OVER, 0, 255, AC_SRC_ALPHA)
@@ -381,12 +399,17 @@ class GlowStrip:
             self.hwnd, screen_dc, ctypes.byref(dst), ctypes.byref(size),
             mem_dc, ctypes.byref(src), 0, ctypes.byref(blend), ULW_ALPHA)
 
-        gdi32.SelectObject(mem_dc, old)
-        gdi32.DeleteObject(bitmap)
-        gdi32.DeleteDC(mem_dc)
-        user32.ReleaseDC(None, screen_dc)
-
     def destroy(self) -> None:
+        surface = getattr(self, "_surface", None)
+        if surface is not None:
+            screen_dc, mem_dc, bitmap, _view = surface
+            self._surface = None          # drop the numpy view FIRST
+            try:
+                gdi32.DeleteObject(bitmap)
+                gdi32.DeleteDC(mem_dc)
+                user32.ReleaseDC(None, screen_dc)
+            except Exception:
+                pass
         try:
             user32.DestroyWindow(self.hwnd)
         except Exception:
@@ -466,79 +489,145 @@ def _ramp(palette, pos: np.ndarray) -> np.ndarray:
     stops = np.array(palette + [palette[0]], dtype=np.float32)      # wrap round
     scaled = (pos % 1.0) * (len(stops) - 1)
     i = np.floor(scaled).astype(int)
-    f = (scaled - i)[:, None]
+    f = (scaled - i)[..., None]
     return stops[i] * (1 - f) + stops[np.minimum(i + 1, len(stops) - 1)] * f
 
 
-# How many comets travel the border, and how fast. Two, opposite each
-# other, because one alone makes three sides look abandoned while it is on
-# the fourth.
-COMETS = 2
-ORBIT_SECONDS = 4.5          # time for one full lap of the screen
-COMET_WIDTH = 0.085          # fraction of the perimeter the head covers
-TAIL = 2.2                   # how much longer the trail is than the head
+# ---------------------------------------------------------------- the look
+# Matched against Apple's edge glow rather than invented. Three things make
+# it read as "that effect" instead of "a coloured border":
+#
+#   1. A ROUNDED rectangle. Square corners are the single biggest tell -
+#      a phone screen has radiused corners and the light follows them.
+#   2. A THIN, BRIGHT core with a soft bloom, not one wide diffuse band.
+#      The first build was 210px of haze; the real thing is a few pixels of
+#      near-white colour with the glow falling away from it.
+#   3. Colour that flows CONTINUOUSLY round the whole outline, so a hue
+#      crossing a corner carries on rather than restarting.
+CORNER_RADIUS = 46        # px, close to a phone's screen radius
+CORE_WIDTH = 5.5          # px, the bright line itself
+BLOOM_WIDTH = 58.0        # px, how far the soft light reaches
+ORBIT_SECONDS = 4.2       # one full lap of the border
 
-# How lit the border is where no comet currently is. Kept low: the first
-# attempt used 0.30 with a tail covering 42% of the perimeter, and two of
-# those simply added up to a uniform band - technically animated, visibly
-# static. A travelling light needs somewhere dark to travel through.
-BASE_GLOW = 0.22
+# How much of the palette is visible around the outline at once.
+#
+# THIS HAS TO BE A WHOLE NUMBER. Position runs 0..1 round the border and
+# wraps at the left edge, mid-height. At exactly 1.15 the colour at
+# position 1 was 0.15 of a palette further on than the colour at position
+# 0, so the two ends did not meet - a hard seam, measured as a jump from
+# RGB (156,78,157) to (119,77,172) across one row. Any integer closes the
+# loop; 1 puts the whole palette round the screen once.
+HUE_SPREAD = 1.0
 
 
-def edge_rgba(s_norm: np.ndarray, depth: int, palette, t: float,
-              intensity: float, horizontal: bool) -> np.ndarray:
+# How finely the border is divided for the colour lookup. 512 steps round
+# the whole outline is far more than the eye resolves, and it turns a
+# per-pixel gradient evaluation into an array index.
+LUT_SIZE = 512
+
+
+def _fields(x0: int, y0: int, w: int, h: int,
+            screen_w: int, screen_h: int) -> dict:
     """
-    One strip of glow, lit by light travelling around the whole border.
+    Precompute everything about one strip that never changes.
 
-    `s_norm` is each column's position along the SCREEN PERIMETER, 0 to 1 -
-    not along this edge. That is the whole trick: the four strips are drawn
-    separately but share one coordinate system, so a comet crossing from the
-    top edge onto the right edge is continuous rather than restarting.
+    THIS IS WHERE THE FRAME BUDGET WAS WON. Computing the falloffs and the
+    colour ramp per pixel per frame cost **39 ms for one strip** - 158 ms
+    for all four, which would have run at 6fps and stuttered visibly.
 
-    Brightness falls away inward on a curve. A linear fade reads as a flat
-    coloured band, which looks like a bug rather than a glow.
+    Everything here depends only on the screen size, so it is built once:
+    the two falloff curves become static arrays, and each pixel's position
+    around the border becomes an INDEX. Per frame all that is left is
+    building two small lookup tables and indexing into them.
     """
-    length = s_norm.shape[0]
+    ys, xs = np.mgrid[y0:y0 + h, x0:x0 + w].astype(np.float32)
+    cx, cy = screen_w / 2.0, screen_h / 2.0
 
-    # --- the travelling light -------------------------------------------
+    # Signed distance to a rounded rectangle: 0 exactly on the outline,
+    # negative inside. This is what makes the corners round for free -
+    # there is no special case for them anywhere.
+    qx = np.abs(xs - cx) - (screen_w / 2.0 - CORNER_RADIUS)
+    qy = np.abs(ys - cy) - (screen_h / 2.0 - CORNER_RADIUS)
+    outside = np.sqrt(np.maximum(qx, 0.0) ** 2 + np.maximum(qy, 0.0) ** 2)
+    inside = np.minimum(np.maximum(qx, qy), 0.0)
+    near = np.abs(outside + inside - CORNER_RADIUS)
+
+    # Where each pixel sits around the outline, as an index. The angle from
+    # centre is not arc-length, but it sweeps smoothly and continuously
+    # through the corners, which is the only property that matters.
+    angle = np.arctan2(ys - cy, xs - cx)
+    position = (angle + np.pi) / (2 * np.pi)
+
+    core = np.exp(-(near / CORE_WIDTH) ** 2)
+    bloom = np.exp(-(near / BLOOM_WIDTH) ** 1.7)
+
+    # Flipped vertically here, once, because a DIB is bottom-up. Doing it
+    # per frame cost a full array copy per strip.
+    return {
+        "core": core.astype(np.float32),
+        "weight_flipped": np.clip(bloom * 0.55 + core * 1.6, 0.0, 1.0
+                                  ).astype(np.float32)[::-1].copy(),
+        "index": np.clip((position * LUT_SIZE).astype(np.int32),
+                         0, LUT_SIZE - 1)[::-1].copy(),
+    }
+
+
+def _lookups(palette, t: float) -> np.ndarray:
+    """
+    The two things that DO change each frame, computed 512 times instead of
+    half a million.
+    """
+    pos = np.linspace(0.0, 1.0, LUT_SIZE, dtype=np.float32)
+
     head = (t / ORBIT_SECONDS) % 1.0
-    glow_along = np.zeros(length, dtype=np.float32)
+    d = np.abs(pos - head)
+    d = np.minimum(d, 1.0 - d)                    # distance round a loop
+    travelling = np.exp(-(d / 0.30) ** 2)
 
-    for k in range(COMETS):
-        centre = (head + k / COMETS) % 1.0
-        # Distance around a LOOP, so a comet spanning the wrap-point does
-        # not tear in half at the top-left corner.
-        d = np.abs(s_norm - centre)
-        d = np.minimum(d, 1.0 - d)
+    # Never fully dark anywhere: the whole outline stays lit and the
+    # travelling part rides on top. Apple's does not go black on three
+    # sides while it is busy on the fourth.
+    #
+    # The bump is WIDE and SHALLOW on purpose. A narrow bright head reads
+    # as a comet doing laps; Apple's reads as the whole border breathing,
+    # with the emphasis drifting round it. Widening 0.17 -> 0.30 and
+    # dropping the contrast is the entire difference between those two.
+    along = (0.74 + 0.26 * travelling).astype(np.float32)
 
-        # Signed version, so the trail can lag behind the head rather than
-        # being symmetric - a symmetric blob reads as a pulse, not motion.
-        signed = (s_norm - centre + 0.5) % 1.0 - 0.5
-        width = np.where(signed < 0, COMET_WIDTH * TAIL, COMET_WIDTH)
-        glow_along += np.exp(-(d / width) ** 2)
+    colours = _ramp(palette, pos * HUE_SPREAD + t * 0.05).astype(np.float32)
 
-    glow_along = np.clip(glow_along, 0.0, 1.15)
+    # Colour and brightness in ONE table, computed for 512 entries rather
+    # than half a million pixels.
+    #
+    # Built as BGRA and ALREADY PREMULTIPLIED, which is exactly the byte
+    # layout Windows wants. Doing the channel swap and the premultiply here,
+    # on 512 rows, means the per-frame path is one multiply and one memcpy
+    # instead of four channel operations over 600k pixels.
+    #
+    # Premultiply exactly ONCE. An earlier version did it here AND in
+    # paint(), which squares the alpha and renders the whole rim far too
+    # dark.
+    a = np.clip(along, 0.0, 1.0)
+    table = np.empty((LUT_SIZE, 4), dtype=np.float32)
+    table[:, 0] = colours[:, 2] * a          # B
+    table[:, 1] = colours[:, 1] * a          # G
+    table[:, 2] = colours[:, 0] * a          # R
+    table[:, 3] = a * 255.0                  # A
+    return table
 
-    # A dim band everywhere, so the border is always faintly lit and the
-    # comets ride on top of it instead of leaving gaps of nothing.
-    along = BASE_GLOW + (1.0 - BASE_GLOW) * glow_along
 
-    # --- colour flows around with the light ------------------------------
-    colours = _ramp(palette, s_norm * 1.25 + t * 0.11)               # (length,3)
+def strip_rgba(field: dict, table: np.ndarray, intensity: float) -> np.ndarray:
+    """
+    One strip of the rim light. Two array lookups and one multiply.
 
-    # --- inward falloff ---------------------------------------------------
-    fall = ((1.0 - np.linspace(0.0, 1.0, depth, dtype=np.float32)) ** 1.9)[:, None]
-
-    field = fall * (along[None, :] * intensity)                      # (depth,length)
-    field = np.clip(field, 0.0, 1.0)
-
-    rgb = (colours[None, :, :] * field[:, :, None]).astype(np.uint8)
-    alpha = (field * 255).astype(np.uint8)
-    frame = np.dstack([rgb, alpha])
-
-    if horizontal:
-        return frame                       # top edge: row 0 is the screen edge
-    return np.transpose(frame, (1, 0, 2)).copy()
+    `table` is a LUT_SIZE x 4 table of premultiplied BGRA-ready values built
+    once per frame. Everything that varies with time lives in there, so the
+    per-pixel work here is as close to nothing as numpy allows - which is
+    the difference between 20fps and a slideshow.
+    """
+    out = table[field["index"]] * field["weight_flipped"][..., None] * intensity
+    np.clip(out, 0.0, 255.0, out=out)
+    return out.astype(np.uint8)
 
 
 # ==========================================================================
@@ -563,13 +652,30 @@ class Glow:
         self.last_news = 0.0
         self.events: queue.Queue = queue.Queue()
 
-        g = min(GLOW, self.sh // 3)
+        # Thin, because the light is a rim rather than a haze. The top and
+        # bottom strips run the FULL width so each of them contains two
+        # whole rounded corners; the sides then only cover the straight
+        # middle. Without that the corners would be split across two
+        # windows and the arc would tear.
+        g = min(GLOW, self.sh // 4)
+        self.depth = g
+
         self.top = GlowStrip(0, 0, self.sw, g)
         self.bottom = GlowStrip(0, self.sh - g, self.sw, g)
-        self.left = GlowStrip(0, 0, g, self.sh)
-        self.right = GlowStrip(self.sw - g, 0, g, self.sh)
-        self.depth = g
+        self.left = GlowStrip(0, g, g, self.sh - 2 * g)
+        self.right = GlowStrip(self.sw - g, g, g, self.sh - 2 * g)
         self.strips = (self.top, self.bottom, self.left, self.right)
+
+        # The distance field never changes while the screen size doesn't,
+        # so build it once. That turns 15ms of maths per frame into a
+        # one-off cost at startup.
+        self.fields = {
+            self.top:    _fields(0, 0, self.sw, g, self.sw, self.sh),
+            self.bottom: _fields(0, self.sh - g, self.sw, g, self.sw, self.sh),
+            self.left:   _fields(0, g, g, self.sh - 2 * g, self.sw, self.sh),
+            self.right:  _fields(self.sw - g, g, g, self.sh - 2 * g,
+                                 self.sw, self.sh),
+        }
         self.caption = Caption(self.sw)
         self.word = ""          # the single word shown, if any
 
@@ -668,30 +774,14 @@ class Glow:
         #   right  top  -> bottom     W            .. W+H
         #   bottom right-> left       W+H          .. 2W+H
         #   left   bottom-> top       2W+H         .. 2W+2H
-        W, H = self.sw, self.sh
-        perim = 2.0 * (W + H)
-        t = self.phase
+        # Built once per FRAME, not once per strip - the tables are the
+        # same for all four, and they are what makes the light continuous
+        # round the corners.
+        table = _lookups(palette, self.phase)
 
-        s_top = np.linspace(0, W, W, dtype=np.float32) / perim
-        s_right = (W + np.linspace(0, H, H, dtype=np.float32)) / perim
-        s_bottom = (W + H + np.linspace(0, W, W, dtype=np.float32)) / perim
-        s_left = (2 * W + H + np.linspace(0, H, H, dtype=np.float32)) / perim
-
-        self.top.show(True)
-        self.top.paint(edge_rgba(s_top, self.depth, palette, t, eased, True))
-
-        # bottom runs right->left, so its own pixels are the reverse of the
-        # perimeter order; flip the result back to screen order.
-        self.bottom.show(True)
-        self.bottom.paint(
-            edge_rgba(s_bottom, self.depth, palette, t, eased, True)[::-1, ::-1].copy())
-
-        self.right.show(True)
-        self.right.paint(edge_rgba(s_right, self.depth, palette, t, eased * 0.95, False)[:, ::-1].copy())
-
-        # left runs bottom->top, so flip vertically.
-        self.left.show(True)
-        self.left.paint(edge_rgba(s_left, self.depth, palette, t, eased * 0.95, False)[::-1].copy())
+        for strip in self.strips:
+            strip.show(True)
+            strip.paint(strip_rgba(self.fields[strip], table, eased))
 
 
 # ==========================================================================
@@ -1039,8 +1129,13 @@ def main() -> None:
                 threading.Thread(target=_open_the_app, daemon=True).start()
         was_down = down
 
+        # Sleep the REMAINDER of the frame, not a whole one on top of the
+        # work. `sleep(frame_time)` after doing 23ms of rendering gives
+        # 73ms frames - 13fps while claiming 20 - and it hides every
+        # optimisation you make, because the fixed sleep dominates.
+        started = time.perf_counter()
         glow.step()
-        time.sleep(frame_time)
+        time.sleep(max(0.0, frame_time - (time.perf_counter() - started)))
 
 
 if __name__ == "__main__":
