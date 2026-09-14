@@ -90,13 +90,23 @@ $s.Save()
 
 
 def overlay_running() -> bool:
-    """Is the on-screen ring already up? Two would draw on top of each other."""
+    """
+    Is the glow already up? Two copies would draw on top of each other.
+
+    THE NAME FILTER IS NOT OPTIONAL. Matching on CommandLine alone finds
+    the PowerShell process running *this very query*, because the pattern
+    'overlay.py' is sitting inside its own command line. That made this
+    always return True, so start_overlay() quietly did nothing and Sid
+    came up with no hotkey at all - a silent failure, which is the worst
+    kind.
+    """
     import subprocess
     try:
         out = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
-             "(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "
-             "'*overlay.py*' }).ProcessId"],
+             "(Get-CimInstance Win32_Process | Where-Object { "
+             "$_.Name -match '^python' -and "
+             "$_.CommandLine -like '*overlay.py*' }).ProcessId"],
             capture_output=True, text=True, timeout=20,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         return bool((out.stdout or "").strip())
