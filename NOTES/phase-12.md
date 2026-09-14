@@ -459,6 +459,61 @@ turn ended: interrupted
 
 ---
 
+## 6f. Two things the last change quietly broke
+
+### The caption came out upside down
+
+Making the glow fast meant `paint()` stopped doing any conversion: it now
+takes **bottom-up premultiplied BGRA**, because that is the exact byte
+layout Windows blits, and the glow builds it directly. That is most of why
+the rim renders in 22ms instead of 158.
+
+The caption never got the memo. It hands over an ordinary PIL image, which
+is top-down, RGB-ordered and straight-alpha - all three wrong. So the word
+appeared **flipped, with red and blue swapped and the pill washed out**.
+
+The temptation is to put the conversion back inside `paint()`. Don't: that
+would slow the path that runs twenty times a second to help the one that
+runs when a word changes.
+
+> **When a fast path gets faster by demanding a stricter input, every
+> caller has to be checked.** The conversion belongs on the slow side.
+
+### It answered in Hindi when spoken to in English
+
+The old rule was "reply in whatever language the user writes in". Sensible,
+and wrong in practice, because in India a sentence is often English with a
+Hindi word in it - and one word was enough to flip the whole answer:
+
+```
+ask:  "Can you do a quick jugaad for this?"
+got:  "Batao kya jugaad karna hai, kya problem aayi hai?"
+```
+
+"Mirror the user" needed replacing with a default plus an explicit,
+countable exception: **English always, unless MOST of the message is
+Hindi.** Prose like "a few Hindi words are not a switch" did not do it; two
+worked examples in the prompt did.
+
+The voice path had its own version of the same bug. The transcription
+prompt said the audio "may be English, Hindi or a mix", which invited
+Gemini to render accented English as Hindi - so the wrong language was
+being chosen before the model ever saw the words. It now says to assume
+English.
+
+> **Fix the input, not just the output.** A wrong answer in Hindi had two
+> independent causes, and correcting the reply rule alone would have left
+> half of it in place.
+
+Both live in `evals/language.py`, so the next prompt edit cannot quietly
+undo it:
+
+```
+6/6 correct
+```
+
+---
+
 ## 6e. Matching Apple's glow, and the seam nobody would have found by eye
 
 "Make it exactly like Apple's" is not a taste request — it is a list of

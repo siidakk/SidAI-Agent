@@ -416,6 +416,33 @@ class GlowStrip:
             pass
 
 
+def _for_windows(rgba: np.ndarray) -> np.ndarray:
+    """
+    Turn an ordinary top-down RGBA image into what UpdateLayeredWindow wants.
+
+    WHY THIS EXISTS. paint() takes bottom-up premultiplied BGRA, because
+    that is the exact byte layout Windows blits and the glow builds it
+    directly - skipping the conversion is most of why the rim renders in
+    22ms instead of 158. But a PIL image is none of those things: it is
+    top-down, RGB-ordered, and straight-alpha.
+
+    Handing one to paint() unconverted is what put the caption ON SCREEN
+    UPSIDE DOWN, with red and blue swapped and the pill washed out. The
+    fast path stayed fast; the slow caller just has to speak its language.
+
+    This runs only when the word changes - a handful of times a turn - so
+    the cost is irrelevant here, which is exactly why the conversion
+    belongs on this side and not in paint().
+    """
+    out = np.empty_like(rgba, dtype=np.uint8)
+    a = rgba[..., 3:4].astype(np.float32) / 255.0
+    out[..., 0] = (rgba[..., 2] * a[..., 0])        # B, premultiplied
+    out[..., 1] = (rgba[..., 1] * a[..., 0])        # G
+    out[..., 2] = (rgba[..., 0] * a[..., 0])        # R
+    out[..., 3] = rgba[..., 3]                      # A
+    return out[::-1].copy()                         # bottom-up
+
+
 class Caption:
     """
     One word at the top of the screen, and never more than one.
@@ -473,7 +500,7 @@ class Caption:
                   font=font, fill=(235, 242, 250, int(255 * alpha)))
 
         self.win.show(True)
-        self.win.paint(np.asarray(image))
+        self.win.paint(_for_windows(np.asarray(image)))
         self.text = text
 
     def destroy(self) -> None:
