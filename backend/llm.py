@@ -35,7 +35,7 @@ import json
 import re
 from typing import AsyncIterator
 
-from . import approvals, config, memory, planner, providers, tools
+from . import approvals, config, fastpath, memory, planner, providers, tools
 
 # Safety valve. If the model gets stuck calling tools forever — and small
 # models absolutely do — we stop after this many rounds. Without this, a
@@ -303,6 +303,31 @@ async def stream_reply(
     last_user = next(
         (m["content"] for m in reversed(messages) if m.get("role") == "user"), ""
     )
+
+    # ---- 0. is this a command that needs no model at all? ---------------
+    #
+    # "volume 30" costs a 1.4s model call purely to decide it means
+    # set_volume(30). That is a lookup wearing a language model's clothes.
+    #
+    # It still goes through tools.run(), so dry-run, the approval policy and
+    # the audit log all apply exactly as they would otherwise. A fast path
+    # that routed around the checkpoint would punch a hole through every
+    # safety property in the project, and the audit log would simply have
+    # gaps where the quick commands went.
+    #
+    # Anything not recognised falls straight through to the planner below.
+    quick = fastpath.match(last_user)
+    if quick is not None and approve is None:
+        name, arguments = quick
+        yield {"type": "tool_call", "tool": name, "input": arguments}
+        result = await tools.run(name, arguments, task_id=task_id)
+        yield {"type": "tool_result", "tool": name, "output": result[:500]}
+        yield {"type": "text", "text": result}
+        yield {"type": "done",
+               "usage": {"input_tokens": 0, "output_tokens": 0},
+               "mode": "fast", "steps": 1}
+        return
+
     context = await memory.build_context(last_user) if last_user else ""
     system = config.SYSTEM_PROMPT + context
 

@@ -314,6 +314,72 @@ ring flickering every time Sid looks.
 
 ---
 
+## 6b. Making it fast, measured rather than guessed
+
+Reported as *"very laggy... click doesn't work at once, it tells me
+coordinates then clicks"*. Before changing anything, 60 real turns said:
+
+| | |
+|---|---|
+| Tools doing the work | **828 ms** |
+| Model calls + overhead | **3,243 ms** |
+
+**The work was never slow. The talking was.** Three fixes, in order of size.
+
+### One call instead of two, for a click
+
+A click was `find_on_screen` (a whole turn) then `click_at` (another turn) —
+four model calls. Those coordinates were never for the user; they were an
+intermediate value making a round trip to the cloud purely because the two
+halves lived in different tools. `click_on` keeps the number inside the
+machine. **6–12s → 6.3s.**
+
+### Skip the second model call when there is nothing to add
+
+`"Volume set to 45%"` is already a finished sentence. Spending two seconds
+asking a model to rephrase it is pure waste. 25 tools are marked
+`speaks_for_itself`; anything multi-step, failed, or returning raw data
+still gets written up, because there the writing is the point.
+
+### The fast path: some commands need no model at all
+
+`"volume 30"` cost a 1.4s model call to decide it meant `set_volume(30)`.
+That is a lookup wearing a language model's clothes.
+
+```
+what time is it      0.06s   (was 5.8s)
+volume 35            0.20s
+what's open          0.42s
+disk space?          3.35s   ← not recognised, planner as before
+```
+
+It still goes through `tools.run()`. **A fast path that routed around the
+checkpoint would punch a hole through every safety property here, and the
+audit log would simply have gaps where the quick commands went.** Verified
+all three: dry run still blocks it, it appears in the audit log, and no
+`danger` tool is ever matched.
+
+Patterns are anchored to the whole message and capped at 70 characters, so
+*"open the report and tell me what the third paragraph says"* reaches the
+planner. **Missing a shortcut costs 1.4 seconds; taking a wrong one costs
+trust.**
+
+### Two things measured and rejected
+
+Both looked promising and both were worth nothing:
+
+- **Smaller screenshots.** 1280px → 768px changed vision latency not at all
+  (1.8–2.1s throughout), and the smallest started inventing coordinates.
+- **Trimming the planner prompt.** 52 tools → 12 saved **0.07s** — 2% of a
+  turn — once measured interleaved. A first, sloppier reading said 0.22s
+  and was noise. Building a relevance filter would have traded correctness
+  for 70ms.
+
+> Measure before optimising, and **measure again properly before believing
+> the first number.**
+
+---
+
 ## 7. ⚠️ The line this phase crosses
 
 Every other tool reads one specific thing you named. This one reads
