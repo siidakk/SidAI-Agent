@@ -239,6 +239,17 @@ def run_turn_held(is_held, on_state=None) -> dict:
         speak("Sorry, I didn't catch that.")
         return {"ok": False, "why": "no words made out"}
 
+    # SHOW WHAT IT HEARD, briefly.
+    #
+    # The whole hands-free path was reported as useless, and the reason was
+    # not that Sid did the wrong thing - it was that there was no way to
+    # SEE it had misheard. "open chrome" became "open my grown that", Sid
+    # did something odd, and the agent looked stupid rather than deaf.
+    #
+    # One glance at the words it captured turns a baffling result into an
+    # obvious one, and tells you whether to blame the ears or the brain.
+    state(f'"{heard[:46]}"')
+
     state("working")
     try:
         answer = ask_sid(heard)
@@ -251,8 +262,22 @@ def run_turn_held(is_held, on_state=None) -> dict:
     return {"ok": True, "heard": heard, "answer": answer}
 
 
-def transcribe(audio: bytes) -> str:
-    """Turn recorded speech into text, locally."""
+def _to_wav(pcm: bytes) -> bytes:
+    """Wrap raw 16-bit mono PCM in a WAV header."""
+    import io
+    import wave
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(SAMPLE_RATE)
+        wf.writeframes(pcm)
+    return buffer.getvalue()
+
+
+def transcribe_local(audio: bytes) -> str:
+    """Vosk. Offline, instant, and only as good as its 40 MB model."""
     if not audio:
         return ""
     from vosk import KaldiRecognizer
@@ -265,8 +290,83 @@ def transcribe(audio: bytes) -> str:
     step = 4000
     for i in range(0, len(audio), step):
         rec.AcceptWaveform(audio[i:i + step])
-    final = json.loads(rec.FinalResult()).get("text", "")
-    return final.strip()
+    return json.loads(rec.FinalResult()).get("text", "").strip()
+
+
+def transcribe_cloud(audio: bytes) -> str:
+    """
+    Gemini. Slower by about two seconds, and right.
+
+    WHY THIS HAD TO CHANGE
+    ----------------------
+    Vosk was the only recogniser here, and on real microphone audio it was
+    producing this:
+
+        "play low fade by ... on youtube"  ->  "laidlaw fade by better noise on you tube"
+        "what did I ask you to remember"   ->  "what what did it at and you to remember"
+        "open chrome"                      ->  "open my grown that"
+
+    Sid then did its best with the garbage, which is why the whole
+    hands-free path felt useless while the app - which uses the browser's
+    cloud recogniser - felt perfect. **It was never the agent. It was deaf.**
+
+    Tested on clean synthesised speech vosk is fine, so the model is not
+    hopeless in the abstract; it falls apart on a real room, a real mic and
+    an Indian-English accent, none of which its American training data
+    covers. Gemini got all three test phrases exactly right, Hinglish
+    included.
+
+    Two seconds for an instruction that actually works beats instant
+    nonsense. Fast and wrong is not a trade, it is just wrong.
+    """
+    import base64
+    import urllib.request
+
+    from backend import config
+
+    if not config.GEMINI_API_KEY:
+        raise RuntimeError("no Gemini key")
+
+    payload = {"contents": [{"role": "user", "parts": [
+        {"text": "Transcribe this audio exactly. It may be English, Hindi or "
+                 "a mix of both (Hinglish) - keep whichever words were "
+                 "actually said, in Roman script. Reply with ONLY the words "
+                 "spoken, no punctuation commentary, nothing else."},
+        {"inline_data": {"mime_type": "audio/wav",
+                         "data": base64.b64encode(_to_wav(audio)).decode()}},
+    ]}]}
+
+    req = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{config.GEMINI_MODEL}:generateContent",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json",
+                 "x-goog-api-key": config.GEMINI_API_KEY})
+
+    data = json.loads(urllib.request.urlopen(req, timeout=60).read())
+    text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    # It sometimes wraps the answer in quotes despite being told not to.
+    return text.strip().strip('"').strip()
+
+
+def transcribe(audio: bytes) -> str:
+    """
+    Cloud first, local as the safety net.
+
+    Gemini is far better on real speech, but it needs the network and a
+    quota that can run out. When it cannot answer, vosk still can - badly,
+    but badly beats not at all, and the failure is then visible in the
+    answer rather than silent.
+    """
+    if not audio:
+        return ""
+    try:
+        heard = transcribe_cloud(audio)
+        if heard:
+            return heard
+    except Exception:
+        pass
+    return transcribe_local(audio)
 
 
 # The SAME conversation the app uses.

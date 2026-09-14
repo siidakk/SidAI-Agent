@@ -380,6 +380,51 @@ Both looked promising and both were worth nothing:
 
 ---
 
+## 6c. "The app is perfect, the glow one is useless"
+
+Both paths hit the same server, the same 61 tools, the same conversation.
+One felt flawless and the other felt broken. The log said why in one look:
+
+```
+you said                           vosk heard
+"play ... on youtube"           →  "laidlaw fade by better noise on you tube"
+"what did I ask you to remember" → "what what did it at and you to remember"
+"open chrome"                   →  "open my grown that"
+```
+
+**It was never the agent. It was deaf.** The app uses the browser's cloud
+recogniser; the glow path used vosk, a 40 MB offline model, and Sid was
+doing its honest best with garbage input.
+
+The revealing part: on **clean synthesised speech vosk is fine** — it got
+all three test phrases nearly right. It falls apart on a real room, a real
+microphone and an Indian-English accent, none of which its American
+training data covers. Testing on clean audio would have declared it healthy.
+
+Gemini — already configured, already paid for by the free tier — got every
+phrase exactly right, Hinglish included. It costs about two seconds.
+
+> **Fast and wrong is not a trade, it is just wrong.** Two seconds for an
+> instruction that works beats instant nonsense.
+
+Vosk stays as the offline fallback, so losing the network degrades quality
+instead of removing the feature.
+
+### And the reason it *felt* useless rather than inaccurate
+
+There was no way to see it had misheard. "Open chrome" became "open my
+grown that", Sid did something odd, and it looked stupid rather than deaf.
+The caption now shows the transcript for a moment before acting:
+
+```
+  "open chrome and search for flights"
+```
+
+One glance tells you whether to blame the ears or the brain. **When a
+system can fail in two different places, show which one failed.**
+
+---
+
 ## 7. ⚠️ The line this phase crosses
 
 Every other tool reads one specific thing you named. This one reads

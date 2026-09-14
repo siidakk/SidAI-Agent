@@ -404,7 +404,7 @@ class Caption:
     """
 
     def __init__(self, screen_w: int):
-        self.w, self.h = 300, 62
+        self.w, self.h = 560, 62
         self.win = GlowStrip((screen_w - self.w) // 2, 18, self.w, self.h)
         self.text = ""
         self._font = None
@@ -850,10 +850,14 @@ def _do_turn(glow) -> None:
 
     def state(word):
         glow.events.put(("word", word))
-        glow.events.put(("state",
-                         {"listening": "listening", "thinking": "thinking",
-                          "working": "thinking", "speaking": "speaking"}
-                         .get(word, "error")))
+        # A quoted string is the transcript, not a state name - show the
+        # words but keep the colour where it was, or every transcript
+        # would flash the error palette.
+        if not word.startswith('"'):
+            glow.events.put(("state",
+                             {"listening": "listening", "thinking": "thinking",
+                              "working": "thinking", "speaking": "speaking"}
+                             .get(word, "error")))
 
     try:
         result = voice_session.run_turn_held(_held, on_state=state)
