@@ -79,6 +79,12 @@ MAX_TURN = 18.0               # hard ceiling, whatever happens
 
 _model = None
 
+# The currently-speaking process, and a counter that says which turn is the
+# live one. Both exist so a turn can be interrupted - see cancel().
+_tts = None
+_tts_lock = __import__("threading").Lock()
+_generation = 0
+
 
 def _get_model():
     """Load the speech model once; it takes a couple of seconds."""
@@ -221,12 +227,21 @@ def run_turn_held(is_held, on_state=None) -> dict:
             except Exception:
                 pass
 
+    mine = generation()
+
+    def superseded() -> bool:
+        """Has a newer press taken over while this turn was working?"""
+        return generation() != mine
+
     state("listening")
     try:
         audio = record_while(is_held)
     except Exception as exc:
         state("error")
         return {"ok": False, "why": f"microphone: {exc}"}
+
+    if superseded():
+        return {"ok": False, "why": "interrupted"}
 
     if not audio:
         state("error")
@@ -250,12 +265,22 @@ def run_turn_held(is_held, on_state=None) -> dict:
     # obvious one, and tells you whether to blame the ears or the brain.
     state(f'"{heard[:46]}"')
 
+    if superseded():
+        return {"ok": False, "heard": heard, "why": "interrupted"}
+
     state("working")
     try:
         answer = ask_sid(heard)
     except Exception as exc:
         state("error")
         return {"ok": False, "heard": heard, "why": f"Sid: {exc}"}
+
+    # A model call cannot be taken back, so the answer may arrive after you
+    # have already started asking something else. Checking here is what
+    # stops Sid talking over your new question with a stale one.
+    if superseded():
+        return {"ok": False, "heard": heard, "answer": answer,
+                "why": "interrupted"}
 
     state("speaking")
     speak(answer)
@@ -450,6 +475,8 @@ def speak(text: str) -> None:
     if len(spoken) > 600:
         spoken = spoken[:600].rsplit(".", 1)[0] + "."
 
+    global _tts
+
     handle, path = tempfile.mkstemp(suffix=".txt", text=True)
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as fh:
@@ -461,16 +488,65 @@ def speak(text: str) -> None:
             "$s.Rate = 1; "
             f"$s.Speak([IO.File]::ReadAllText('{path}', "
             "[Text.Encoding]::UTF8))")
-        subprocess.run(["powershell", "-NoProfile", "-Command", script],
-                       capture_output=True, timeout=120,
-                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+        # Popen, not run(). run() blocks until the sentence finishes, and
+        # there is then no handle to kill - so pressing the key mid-answer
+        # could do nothing but wait politely for Sid to stop talking.
+        # Interrupting something is only possible if you kept hold of it.
+        with _tts_lock:
+            _tts = subprocess.Popen(
+                ["powershell", "-NoProfile", "-Command", script],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        proc = _tts
+        try:
+            proc.wait(timeout=120)
+        except Exception:
+            pass
     except Exception:
         pass
     finally:
+        with _tts_lock:
+            _tts = None
         try:
             os.unlink(path)
         except Exception:
             pass
+
+
+def stop_speaking() -> bool:
+    """Cut Sid off mid-sentence. Returns whether anything was talking."""
+    global _tts
+    with _tts_lock:
+        proc = _tts
+        _tts = None
+    if proc is None or proc.poll() is not None:
+        return False
+    try:
+        proc.kill()
+        return True
+    except Exception:
+        return False
+
+
+def cancel() -> bool:
+    """
+    Abandon whatever is in flight so a new request can start immediately.
+
+    Bumps a generation counter as well as killing the speech. The old turn
+    may still be waiting on a model call it cannot take back; the counter
+    is how it learns, when that finally returns, that nobody is waiting for
+    the answer any more and it should quietly stop rather than speak over
+    whatever is happening now.
+    """
+    global _generation
+    with _tts_lock:
+        _generation += 1
+    return stop_speaking()
+
+
+def generation() -> int:
+    return _generation
 
 
 def run_turn(on_state=None) -> dict:

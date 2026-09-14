@@ -425,6 +425,40 @@ system can fail in two different places, show which one failed.**
 
 ---
 
+## 6d. Interrupting it
+
+Pressing the key while Sid was mid-answer did nothing — the turn was
+already running, so the press was ignored and you had to sit through a
+ten-second spoken reply before you could say anything. That is not how
+talking to someone works. You interrupt, and they stop.
+
+Two things had to change.
+
+**Speech had to become killable.** `speak()` used `subprocess.run()`, which
+blocks until the sentence finishes and leaves no handle behind. Switching
+to `Popen` and keeping the handle is the whole fix:
+
+```
+uninterrupted   10.8s
+interrupted      1.9s
+```
+
+> **You can only interrupt something you kept hold of.**
+
+**And a turn had to be able to give up.** A model call cannot be taken
+back, so an answer can still arrive after you have started asking something
+else. A generation counter bumps on every interruption, and the turn checks
+it before speaking — which is what stops Sid answering your new question
+with the old one's reply.
+
+Verified with two real key presses, the second landing mid-turn:
+
+```
+turn ended: interrupted
+```
+
+---
+
 ## 7. ⚠️ The line this phase crosses
 
 Every other tool reads one specific thing you named. This one reads

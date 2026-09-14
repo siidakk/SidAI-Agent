@@ -913,6 +913,18 @@ def already_running() -> bool:
 _turn_running = threading.Event()
 
 
+def _restart_after_cancel(glow) -> None:
+    """Wait for the interrupted turn to let go, then start a fresh one."""
+    for _ in range(30):                       # up to ~3s
+        if not _turn_running.is_set():
+            break
+        time.sleep(0.1)
+    if _held():                               # still holding? they meant it
+        _run_turn_guarded(glow)
+    else:
+        glow.events.put(("dismiss", None))
+
+
 def _run_turn_guarded(glow) -> None:
     _turn_running.set()
     try:
@@ -985,6 +997,31 @@ def main() -> None:
         # reports the press, and this needs the release too - that is what
         # ends the recording.
         down = _held()
+
+        # PRESSING THE KEY MEANS "STOP AND LISTEN TO ME".
+        #
+        # It used to be ignored while a turn was running, so if Sid was
+        # halfway through a long spoken answer you had to sit and wait for
+        # it to finish before you could say anything. That is not how
+        # talking to someone works - you interrupt, and they stop.
+        if down and not was_down and _turn_running.is_set() and ptt_on():
+            try:
+                import voice_session
+                if voice_session.cancel():
+                    _log("interrupted mid-answer")
+            except Exception:
+                pass
+            glow.events.put(("word", "listening"))
+            glow.events.put(("state", "listening"))
+            # The old thread notices it has been superseded and exits; give
+            # it a moment to let go of the microphone before reopening it.
+            threading.Thread(target=_restart_after_cancel, args=(glow,),
+                             daemon=True).start()
+            was_down = down
+            glow.step()
+            time.sleep(frame_time)
+            continue
+
         if down and not was_down and not _turn_running.is_set() and ptt_on():
             # ONE SETTING, BOTH DOORS.
             #
