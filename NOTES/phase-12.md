@@ -514,6 +514,49 @@ undo it:
 
 ---
 
+## 6g. Twelve passing tests and a dead microphone
+
+The language fix above shipped with a broken string literal in
+`voice_session.py`. Every key press then said **"no voice"**, because
+that is the only thing the overlay prints when the import throws:
+
+```
+21:44:58  voice unavailable: unterminated string literal (line 356)
+```
+
+The file had not been imported once between editing it and shipping it.
+
+### The part that should be uncomfortable
+
+The eval suite passed. Twelve out of twelve, run twice, right after the
+edit. It talks to the backend over HTTP and never touches
+`voice_session.py` at all - so it was measuring the half that still
+worked and reporting it as the whole.
+
+> **A green suite means the things it covers are fine. It says nothing
+> whatsoever about the things it doesn't.** The reassurance is the
+> dangerous part: without the suite I would have gone and tried the key.
+
+### The guard
+
+`evals/run.py` now imports every top-level module before it asks a single
+question, and refuses to continue if any of them fails:
+
+```
+These modules do not import - nothing else is worth running:
+  voice_session.py: SyntaxError: unterminated string literal (line 610)
+```
+
+Verified by deliberately breaking the file and watching it stop.
+
+An import is the cheapest check there is, and it catches a whole class of
+damage - a typo, a bad escape, a rename someone missed - that no amount
+of clever questions ever will.
+
+> **Check the code loads before you check what it does.**
+
+---
+
 ## 6e. Matching Apple's glow, and the seam nobody would have found by eye
 
 "Make it exactly like Apple's" is not a taste request — it is a list of

@@ -177,6 +177,37 @@ def cleanup(case: dict) -> None:
 #  Running the lot
 # ==========================================================================
 
+def imports_cleanly() -> list[str]:
+    """
+    Can every top-level module still be parsed and imported?
+
+    WHY THIS COMES FIRST, BEFORE ANY QUESTION IS ASKED
+    --------------------------------------------------
+    A prompt edit once left a broken string literal in voice_session.py.
+    The whole suite below passed - twelve for twelve - because it drives
+    the backend through HTTP and never imports that file. Meanwhile every
+    key press said "no voice", because the overlay could not import it.
+
+    The suite was testing the part that still worked.
+
+    An import is the cheapest possible check and it catches a whole class
+    of damage - a typo, a bad escape, a rename someone missed - that no
+    amount of asking clever questions ever will.
+
+        > **Check the code loads before you check what it does.**
+    """
+    import importlib
+    broken = []
+    for path in sorted(ROOT.glob("*.py")):
+        if path.name in ("install.py", "setup_wake_word.py", "connect.py"):
+            continue            # these do real work at import time
+        try:
+            importlib.import_module(path.stem)
+        except Exception as exc:
+            broken.append(f"{path.name}: {type(exc).__name__}: {exc}")
+    return broken
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Sid's eval suite.")
     parser.add_argument("--case", help="only cases whose name contains this")
@@ -199,6 +230,15 @@ def main() -> int:
         if not cases:
             print(f"No case matches {args.case!r}.")
             return 2
+
+    broken = imports_cleanly()
+    if broken:
+        print("These modules do not import - nothing else is worth running:")
+        print()
+        for line in broken:
+            print(f"  {line}")
+        return 1
+    print("imports: all modules load")
 
     print(f"Sid: {health['provider']} · {health.get('detail','')} · "
           f"{health['tools']} tools")

@@ -353,15 +353,11 @@ def transcribe_cloud(audio: bytes) -> str:
         raise RuntimeError("no Gemini key")
 
     payload = {"contents": [{"role": "user", "parts": [
-        {"text": "Transcribe this audio exactly, in Roman script.
-
-"
+        {"text": "Transcribe this audio exactly, in Roman script. "
                  "The speaker is an Indian English speaker. ASSUME ENGLISH. "
                  "Only write a Hindi word where one was genuinely spoken and "
                  "no English word was - do not 'correct' accented English "
-                 "into Hindi, which makes Sid answer in the wrong language.
-
-"
+                 "into Hindi, which makes Sid answer in the wrong language. "
                  "Reply with ONLY the words spoken - no commentary, no "
                  "punctuation notes, nothing else."},
         {"inline_data": {"mime_type": "audio/wav",
