@@ -459,6 +459,83 @@ turn ended: interrupted
 
 ---
 
+## 6e. Matching Apple's glow, and the seam nobody would have found by eye
+
+"Make it exactly like Apple's" is not a taste request — it is a list of
+specific, checkable differences. There were four.
+
+**1. Square corners.** The single biggest tell. A phone's light follows a
+radiused screen, so four straight strips will never read right no matter
+what colour they are. The fix is a **signed distance field** for a rounded
+rectangle: for every pixel, how far is it from the outline?
+
+```
+qx = |x - cx| - (w/2 - r)
+qy = |y - cy| - (h/2 - r)
+near = | sqrt(max(qx,0)^2 + max(qy,0)^2) + min(max(qx,qy),0) - r |
+```
+
+The corners come out round with **no special case for them anywhere** —
+that is the whole point of describing a shape by distance instead of by
+its edges.
+
+**2. One wide haze instead of a rim.** The first build was 210px of
+uniform fog. The real thing is a *thin bright line* with light falling
+away from it — two curves, not one: a `CORE_WIDTH` of about 5px and a
+`BLOOM_WIDTH` of about 58px.
+
+**3. A comet doing laps.** A narrow travelling bright spot reads as an
+object moving round the edge. Apple's reads as the whole border breathing
+with the emphasis drifting. Same code, different numbers: widen the bump
+from 0.17 to 0.30 and drop its contrast from 0.62+0.38 to 0.74+0.26.
+
+**4. A seam, exactly halfway down the left edge.**
+
+Each pixel's position round the border comes from `atan2`, which wraps
+from 1 back to 0 at the left edge, mid-height. The colour ramp wraps too —
+so that should meet cleanly. It did not:
+
+```
+y=532   RGB (156, 78, 157)
+y=540   RGB (119, 77, 172)      <- one row later
+```
+
+`HUE_SPREAD` was **1.15**. Position 1 landed 0.15 of a palette further on
+than position 0, so the two ends of a loop did not join. **It has to be a
+whole number**, and nothing else will do.
+
+> Worth sitting with: the seam is visible in a screenshot, but it is so
+> easy to read as "a bit of colour variation" that it survived a build,
+> a performance rewrite, and several looks at the screen. What caught it
+> was **printing the pixel values down the edge** instead of looking at
+> them. Rendering bugs are still bugs, and an array of numbers is a much
+> better witness than an eye is.
+
+### Rendering it offline
+
+All of the above was found without once looking at the laptop's edge. The
+renderer's maths is pure — screen size in, pixels out — so a thirty-line
+script composites the four strips onto a dark canvas and saves a PNG.
+
+That means you can look at one frame as long as you like, diff two
+versions, and read exact pixel values. **Separate the thing that computes
+the image from the thing that puts it on the screen**, and the hard half
+becomes testable.
+
+### The cost of the wider bloom
+
+Deepening the windows from 84px to 104px is 29% more pixels per frame.
+Measured rather than assumed:
+
+```
+per frame   22.5 ms    headroom for 44 fps
+on screen   19.7 fps   against a target of 20
+```
+
+Well inside the 50ms budget, so it was worth spending.
+
+---
+
 ## 6f. Two things the last change quietly broke
 
 ### The caption came out upside down
@@ -663,83 +740,6 @@ exist, and do not retry.
 
 ---
 
-## 6e. Matching Apple's glow, and the seam nobody would have found by eye
-
-"Make it exactly like Apple's" is not a taste request — it is a list of
-specific, checkable differences. There were four.
-
-**1. Square corners.** The single biggest tell. A phone's light follows a
-radiused screen, so four straight strips will never read right no matter
-what colour they are. The fix is a **signed distance field** for a rounded
-rectangle: for every pixel, how far is it from the outline?
-
-```
-qx = |x - cx| - (w/2 - r)
-qy = |y - cy| - (h/2 - r)
-near = | sqrt(max(qx,0)^2 + max(qy,0)^2) + min(max(qx,qy),0) - r |
-```
-
-The corners come out round with **no special case for them anywhere** —
-that is the whole point of describing a shape by distance instead of by
-its edges.
-
-**2. One wide haze instead of a rim.** The first build was 210px of
-uniform fog. The real thing is a *thin bright line* with light falling
-away from it — two curves, not one: a `CORE_WIDTH` of about 5px and a
-`BLOOM_WIDTH` of about 58px.
-
-**3. A comet doing laps.** A narrow travelling bright spot reads as an
-object moving round the edge. Apple's reads as the whole border breathing
-with the emphasis drifting. Same code, different numbers: widen the bump
-from 0.17 to 0.30 and drop its contrast from 0.62+0.38 to 0.74+0.26.
-
-**4. A seam, exactly halfway down the left edge.**
-
-Each pixel's position round the border comes from `atan2`, which wraps
-from 1 back to 0 at the left edge, mid-height. The colour ramp wraps too —
-so that should meet cleanly. It did not:
-
-```
-y=532   RGB (156, 78, 157)
-y=540   RGB (119, 77, 172)      <- one row later
-```
-
-`HUE_SPREAD` was **1.15**. Position 1 landed 0.15 of a palette further on
-than position 0, so the two ends of a loop did not join. **It has to be a
-whole number**, and nothing else will do.
-
-> Worth sitting with: the seam is visible in a screenshot, but it is so
-> easy to read as "a bit of colour variation" that it survived a build,
-> a performance rewrite, and several looks at the screen. What caught it
-> was **printing the pixel values down the edge** instead of looking at
-> them. Rendering bugs are still bugs, and an array of numbers is a much
-> better witness than an eye is.
-
-### Rendering it offline
-
-All of the above was found without once looking at the laptop's edge. The
-renderer's maths is pure — screen size in, pixels out — so a thirty-line
-script composites the four strips onto a dark canvas and saves a PNG.
-
-That means you can look at one frame as long as you like, diff two
-versions, and read exact pixel values. **Separate the thing that computes
-the image from the thing that puts it on the screen**, and the hard half
-becomes testable.
-
-### The cost of the wider bloom
-
-Deepening the windows from 84px to 104px is 29% more pixels per frame.
-Measured rather than assumed:
-
-```
-per frame   22.5 ms    headroom for 44 fps
-on screen   19.7 fps   against a target of 20
-```
-
-Well inside the 50ms budget, so it was worth spending.
-
----
-
 ## 7. ⚠️ The line this phase crosses
 
 Every other tool reads one specific thing you named. This one reads
@@ -830,3 +830,21 @@ gap and remove the strongest defence in the project.
 - Why is `RegisterHotKey` better than a keyboard hook for a program that
   runs all day?
 - What is the one `read` tool where "changes nothing" isn't "harmless"?
+
+On the glow, the tests, and the quota work:
+
+- Why does a signed distance field give you rounded corners without a
+  single line of code about corners?
+- `HUE_SPREAD` was 1.15 and produced a visible seam. Why does it have to
+  be a whole number, and why did nobody see it for three builds?
+- The frame loop slept for a whole frame *after* doing the work. Why did
+  that hide three separate optimisations?
+- `paint()` got faster by demanding a stricter input. What broke, and why
+  was putting the conversion back inside it the wrong fix?
+- The eval suite passed 12/12 while the microphone was completely dead.
+  What does that tell you about what a green suite actually means?
+- Search puts its BEST backend fourth out of five. Why is that right?
+- 503 and 429 both mean "not now". Why do they want opposite responses?
+- Why does `quota.py` live on disk rather than in memory?
+- If every backend is resting, the code tries anyway. Why is that not a
+  pointless waste of a round trip?

@@ -61,6 +61,8 @@ slow, close the laptop, and check the answer on your phone later.
 
 Every phase has a write-up in [`NOTES/`](NOTES/) explaining the *concepts*,
 the trade-offs, and the bugs — in plain language, not just commented code.
+About 5,000 lines of it, so start from the index:
+**[NOTES/README.md](NOTES/README.md)**.
 
 ### Ground rules it keeps
 
